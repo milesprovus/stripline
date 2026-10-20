@@ -8,6 +8,7 @@ use objc2_foundation::MainThreadMarker;
 use super::ax;
 use crate::config::{self, Config};
 use crate::ipc;
+use crate::keys::{Key, Mods};
 
 /// Window managers and snapping tools that fight over window frames.
 const CONFLICTS: &[(&str, &str)] = &[
@@ -56,6 +57,25 @@ pub fn report() -> String {
             Config::default()
         }
     };
+
+    // Workspace keys that collide with the macOS screenshot shortcuts.
+    let shots: Vec<String> = cfg
+        .bindings()
+        .0
+        .iter()
+        .filter(|(k, _)| k.mods == (Mods::CMD | Mods::SHIFT) && matches!(k.key, Key::Char('3' | '4' | '5')))
+        .map(|(k, a)| format!("{k} ({a})"))
+        .collect();
+    if !shots.is_empty() {
+        out.push(line(
+            false,
+            &format!(
+                "{} also take macOS screenshot shortcuts. Change them in System Settings > Keyboard > \
+                 Keyboard Shortcuts > Screenshots, or rebind them in [bindings]",
+                shots.join(", ")
+            ),
+        ));
+    }
 
     let running: Vec<String> = NSWorkspace::sharedWorkspace()
         .runningApplications()

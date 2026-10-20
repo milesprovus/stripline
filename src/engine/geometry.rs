@@ -55,6 +55,11 @@ impl Rect {
     pub fn overlaps_vertically(&self, other: &Rect) -> bool {
         self.y < other.max_y() - 1.0 && other.y < self.max_y() - 1.0
     }
+
+    /// Horizontal ranges overlap by more than a pixel.
+    pub fn overlaps_horizontally(&self, other: &Rect) -> bool {
+        self.x < other.max_x() - 1.0 && other.x < self.max_x() - 1.0
+    }
 }
 
 #[cfg(test)]

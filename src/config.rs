@@ -8,7 +8,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::action::Action;
-use crate::engine::{CenterMode, OpenAt, Rect};
+use crate::engine::{CenterMode, Mode, OpenAt, Rect};
 use crate::keys::KeyCombo;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -45,6 +45,9 @@ pub struct LayoutConfig {
     pub center: CenterMode,
     /// Where new windows open.
     pub open_at: OpenAt,
+    /// Layout of workspaces that have not been switched with toggle-layout:
+    /// "split" (windows share the screen) or "scroll" (scrolling strip).
+    pub default_mode: Mode,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -183,6 +186,7 @@ impl Default for LayoutConfig {
             height_step: 0.1,
             center: CenterMode::Never,
             open_at: OpenAt::Next,
+            default_mode: Mode::Split,
         }
     }
 }
@@ -259,6 +263,10 @@ pub fn default_bindings() -> Vec<(String, String)> {
         ("ctrl+alt+o", "focus-next-display"),
         ("ctrl+alt+shift+o", "focus-prev-display"),
         ("ctrl+alt+q", "toggle-tiling"),
+        ("ctrl+alt+s", "toggle-layout"),
+        ("ctrl+alt+shift+s", "toggle-split"),
+        ("ctrl+alt+tab", "next-workspace"),
+        ("ctrl+alt+shift+tab", "prev-workspace"),
     ]
     .iter()
     .map(|(k, a)| (k.to_string(), a.to_string()))
@@ -266,6 +274,9 @@ pub fn default_bindings() -> Vec<(String, String)> {
     for n in 1..=9 {
         b.push((format!("ctrl+alt+{n}"), format!("focus-column {n}")));
         b.push((format!("ctrl+alt+shift+{n}"), format!("move-to-column {n}")));
+        // Workspaces, as on Omarchy/Hyprland with Super = Command.
+        b.push((format!("cmd+{n}"), format!("workspace {n}")));
+        b.push((format!("cmd+shift+{n}"), format!("move-to-workspace {n}")));
     }
     b
 }

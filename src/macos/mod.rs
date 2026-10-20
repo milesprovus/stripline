@@ -10,6 +10,7 @@ mod ffi;
 mod keymap;
 mod menu;
 mod observer;
+mod sink;
 mod wm;
 
 use std::ptr::NonNull;

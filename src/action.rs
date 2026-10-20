@@ -43,7 +43,22 @@ pub enum Action {
     Retile,
     ReloadConfig,
     Quit,
+    /// Show workspace n (1-9).
+    Workspace(u8),
+    /// Move the focused window to workspace n and follow it.
+    MoveToWorkspace(u8),
+    /// Move the focused window to workspace n and stay here.
+    MoveToWorkspaceSilent(u8),
+    NextWorkspace,
+    PrevWorkspace,
+    /// Switch the current workspace between scrolling and split layout.
+    ToggleLayout,
+    /// Split layout: flip the focused split between side by side and stacked.
+    ToggleSplit,
 }
+
+/// Highest workspace number.
+pub const MAX_WORKSPACE: u8 = 9;
 
 const SIMPLE: &[(&str, Action)] = &[
     ("focus-left", Action::Focus(Dir::Left)),
@@ -83,13 +98,27 @@ const SIMPLE: &[(&str, Action)] = &[
     ("retile", Action::Retile),
     ("reload-config", Action::ReloadConfig),
     ("quit", Action::Quit),
+    ("next-workspace", Action::NextWorkspace),
+    ("prev-workspace", Action::PrevWorkspace),
+    ("toggle-layout", Action::ToggleLayout),
+    ("toggle-split", Action::ToggleSplit),
 ];
 
 impl Action {
     /// Every action name, for help output.
     pub fn names() -> Vec<String> {
         let mut v: Vec<String> = SIMPLE.iter().map(|(n, _)| n.to_string()).collect();
-        v.extend(["focus-column <n>", "move-to-column <n>", "set-width <fraction>"].map(String::from));
+        v.extend(
+            [
+                "focus-column <n>",
+                "move-to-column <n>",
+                "set-width <fraction>",
+                "workspace <1-9>",
+                "move-to-workspace <1-9>",
+                "move-to-workspace-silent <1-9>",
+            ]
+            .map(String::from),
+        );
         v
     }
 
@@ -125,6 +154,18 @@ impl FromStr for Action {
         };
         match name.as_str() {
             "focus-column" => Ok(Action::FocusColumn(num("a column number")?)),
+            "workspace" | "move-to-workspace" | "move-to-workspace-silent" => {
+                let a = arg.ok_or(format!("'{name}' needs a workspace number (1-{MAX_WORKSPACE})"))?;
+                let n = match a.parse::<u8>() {
+                    Ok(n) if (1..=MAX_WORKSPACE).contains(&n) => n,
+                    _ => return Err(format!("'{a}' is not a workspace number (1-{MAX_WORKSPACE})")),
+                };
+                Ok(match name.as_str() {
+                    "workspace" => Action::Workspace(n),
+                    "move-to-workspace" => Action::MoveToWorkspace(n),
+                    _ => Action::MoveToWorkspaceSilent(n),
+                })
+            }
             "move-to-column" => Ok(Action::MoveToColumn(num("a column number")?)),
             "set-width" => {
                 let a = arg.ok_or("'set-width' needs a fraction such as 0.5")?;
@@ -150,6 +191,9 @@ impl fmt::Display for Action {
             Action::FocusColumn(n) => write!(f, "focus-column {n}"),
             Action::MoveToColumn(n) => write!(f, "move-to-column {n}"),
             Action::SetWidth(w) => write!(f, "set-width {w}"),
+            Action::Workspace(n) => write!(f, "workspace {n}"),
+            Action::MoveToWorkspace(n) => write!(f, "move-to-workspace {n}"),
+            Action::MoveToWorkspaceSilent(n) => write!(f, "move-to-workspace-silent {n}"),
             _ => unreachable!("every simple action is in the table"),
         }
     }
@@ -165,13 +209,24 @@ mod tests {
             assert_eq!(name.parse::<Action>().unwrap(), *a);
             assert_eq!(a.to_string(), *name);
         }
-        for s in ["focus-column 3", "move-to-column 1", "set-width 0.5"] {
+        for s in [
+            "focus-column 3",
+            "move-to-column 1",
+            "set-width 0.5",
+            "workspace 4",
+            "move-to-workspace 9",
+            "move-to-workspace-silent 2",
+        ] {
             assert_eq!(s.parse::<Action>().unwrap().to_string(), s);
         }
     }
 
     #[test]
     fn arguments() {
+        assert!("workspace 0".parse::<Action>().is_err());
+        assert!("workspace 10".parse::<Action>().is_err());
+        assert!("move-to-workspace".parse::<Action>().is_err());
+        assert_eq!("Workspace 3".parse::<Action>().unwrap(), Action::Workspace(3));
         assert_eq!("set-width 50%".parse::<Action>().unwrap(), Action::SetWidth(0.5));
         assert_eq!("set-width 25".parse::<Action>().unwrap(), Action::SetWidth(0.25));
         assert_eq!("Centre".parse::<Action>().unwrap(), Action::Center);

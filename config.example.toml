@@ -16,6 +16,9 @@ width_step = 0.1        # wider / narrower
 height_step = 0.1       # taller / shorter
 center = "never"        # "never" | "on-overflow" | "always"
 open_at = "next"        # "next" (right of focus) | "start" | "end"
+default_mode = "split"  # layout of each workspace until you toggle it (ctrl+alt+s):
+                        # "split" = windows share the screen, like Hyprland/Omarchy
+                        # "scroll" = scrolling strip of columns
 
 [animation]
 enabled = true

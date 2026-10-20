@@ -4,23 +4,30 @@
 //! running, which covers restarting Stripline itself), then by app and title
 //! (covers apps that were relaunched with the same documents open).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use super::strip::{Column, Side, Strip, WinId};
+use super::strip::{Column, Mode, Side, Strip, WinId};
 use super::StripKey;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub version: u32,
     pub strips: Vec<SavedStrip>,
+    /// Workspace shown on each display (by display UUID).
+    #[serde(default)]
+    pub active: BTreeMap<String, u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedStrip {
     pub key: StripKey,
     pub focus: usize,
+    /// Split-mode workspaces are saved as one column per window in reading
+    /// order and rebuilt as a dwindle split. `None` in older files.
+    #[serde(default)]
+    pub mode: Option<Mode>,
     pub columns: Vec<SavedColumn>,
 }
 
@@ -64,10 +71,14 @@ impl Session {
     pub const VERSION: u32 = 1;
 
     /// Snapshot the current strips. `describe` returns (app, title) for a window.
-    pub fn capture<F>(strips: &HashMap<StripKey, Strip>, describe: F) -> Session
+    pub fn capture<F>(strips: &HashMap<StripKey, Strip>, active: &HashMap<String, u8>, describe: F) -> Session
     where
         F: Fn(WinId) -> (String, String),
     {
+        let saved_window = |id: WinId, weight: f64| {
+            let (app, title) = describe(id);
+            SavedWindow { id, app, title, weight }
+        };
         let mut keys: Vec<&StripKey> = strips.keys().collect();
         keys.sort();
         let strips = keys
@@ -75,38 +86,55 @@ impl Session {
             .filter(|k| !strips[*k].is_empty())
             .map(|k| {
                 let s = &strips[k];
-                SavedStrip {
-                    key: k.clone(),
-                    focus: s.focus,
-                    columns: s
-                        .columns
-                        .iter()
-                        .map(|c| SavedColumn {
-                            width: c.width,
-                            restore_width: c.restore_width,
-                            tabbed: c.tabbed,
-                            pin: c.pin,
-                            active: c.active,
-                            windows: c
-                                .windows
-                                .iter()
-                                .zip(&c.weights)
-                                .map(|(&id, &weight)| {
-                                    let (app, title) = describe(id);
-                                    SavedWindow { id, app, title, weight }
-                                })
-                                .collect(),
-                        })
-                        .collect(),
-                }
+                let (focus, columns) = match s.mode {
+                    Mode::Scroll => (
+                        s.focus,
+                        s.columns
+                            .iter()
+                            .map(|c| SavedColumn {
+                                width: c.width,
+                                restore_width: c.restore_width,
+                                tabbed: c.tabbed,
+                                pin: c.pin,
+                                active: c.active,
+                                windows: c
+                                    .windows
+                                    .iter()
+                                    .zip(&c.weights)
+                                    .map(|(&id, &w)| saved_window(id, w))
+                                    .collect(),
+                            })
+                            .collect(),
+                    ),
+                    Mode::Split => {
+                        let order = s.tree.windows();
+                        let focus = s.tree.focus.and_then(|f| order.iter().position(|&w| w == f)).unwrap_or(0);
+                        let columns = order
+                            .iter()
+                            .map(|&id| SavedColumn {
+                                width: 0.5,
+                                restore_width: None,
+                                tabbed: false,
+                                pin: None,
+                                active: 0,
+                                windows: vec![saved_window(id, 1.0)],
+                            })
+                            .collect();
+                        (focus, columns)
+                    }
+                };
+                SavedStrip { key: k.clone(), focus, mode: Some(s.mode), columns }
             })
             .collect();
-        Session { version: Self::VERSION, strips }
+        let active = active.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        Session { version: Self::VERSION, strips, active }
     }
 
-    /// Rebuild strips for the given live windows. Returns the strips and the
-    /// indices (into `live`) of windows that had no saved place.
-    pub fn restore(&self, live: &[LiveWindow]) -> (HashMap<StripKey, Strip>, Vec<usize>) {
+    /// Rebuild strips for the given live windows. Windows keep their saved
+    /// workspace; display and Space come from where they are now. Returns the
+    /// strips and the indices (into `live`) of windows that had no saved place.
+    /// Strips saved without a mode get `default_mode`.
+    pub fn restore(&self, live: &[LiveWindow], default_mode: Mode) -> (HashMap<StripKey, Strip>, Vec<usize>) {
         let mut used = vec![false; live.len()];
         // (strip, column, window) -> live index
         let mut assigned: HashMap<(usize, usize, usize), usize> = HashMap::new();
@@ -142,6 +170,7 @@ impl Session {
         }
 
         let mut strips: HashMap<StripKey, Strip> = HashMap::new();
+        let mut modes: HashMap<StripKey, Mode> = HashMap::new();
         for (s, saved) in self.strips.iter().enumerate() {
             for (c, col) in saved.columns.iter().enumerate() {
                 // A saved column may now be split across strips (a display
@@ -149,7 +178,7 @@ impl Session {
                 let mut groups: Vec<(StripKey, Column)> = Vec::new();
                 for (w, win) in col.windows.iter().enumerate() {
                     let Some(&i) = assigned.get(&(s, c, w)) else { continue };
-                    let key = &live[i].key;
+                    let key = &StripKey { workspace: saved.key.workspace, ..live[i].key.clone() };
                     let group = match groups.iter_mut().find(|(k, _)| k == key) {
                         Some((_, g)) => g,
                         None => {
@@ -170,6 +199,7 @@ impl Session {
                     group.weights.push(if win.weight > 0.0 { win.weight } else { 1.0 });
                 }
                 for (key, column) in groups {
+                    modes.entry(key.clone()).or_insert(saved.mode.unwrap_or(default_mode));
                     let strip = strips.entry(key).or_default();
                     if c == saved.focus {
                         strip.focus = strip.columns.len();
@@ -194,6 +224,11 @@ impl Session {
             }
             strip.focus = strip.focus.min(n.saturating_sub(1));
         }
+        for (key, mode) in modes {
+            if let Some(strip) = strips.get_mut(&key) {
+                strip.set_mode(mode, 0.5);
+            }
+        }
 
         let leftovers = (0..live.len()).filter(|&i| !used[i]).collect();
         (strips, leftovers)
@@ -206,7 +241,11 @@ mod tests {
     use crate::engine::strip::OpenAt;
 
     fn key(d: &str, s: u64) -> StripKey {
-        StripKey { display: d.into(), space: s }
+        StripKey { display: d.into(), space: s, workspace: 1 }
+    }
+
+    fn capture(strips: &HashMap<StripKey, Strip>) -> Session {
+        Session::capture(strips, &HashMap::new(), names)
     }
 
     fn live(id: WinId, app: &str, title: &str, k: &StripKey) -> LiveWindow {
@@ -232,12 +271,12 @@ mod tests {
     #[test]
     fn round_trip_by_id() {
         let (strips, k) = sample();
-        let session = Session::capture(&strips, names);
+        let session = capture(&strips);
         let json = serde_json::to_string(&session).unwrap();
         let session: Session = serde_json::from_str(&json).unwrap();
         let ws: Vec<LiveWindow> =
             [13, 12, 11, 10].iter().map(|&id| live(id, "com.example.app", &format!("Doc {id}"), &k)).collect();
-        let (restored, left) = session.restore(&ws);
+        let (restored, left) = session.restore(&ws, Mode::Scroll);
         assert!(left.is_empty());
         let s = &restored[&k];
         assert_eq!(
@@ -252,7 +291,7 @@ mod tests {
     #[test]
     fn falls_back_to_app_and_title_and_new_space_ids() {
         let (strips, _) = sample();
-        let session = Session::capture(&strips, names);
+        let session = capture(&strips);
         // After a reboot: new window ids, new space id, same display.
         let k2 = key("D1", 99);
         let ws = vec![
@@ -260,7 +299,7 @@ mod tests {
             live(502, "com.example.app", "Doc 10", &k2),
             live(503, "com.other", "Untitled", &k2),
         ];
-        let (restored, left) = session.restore(&ws);
+        let (restored, left) = session.restore(&ws, Mode::Scroll);
         assert_eq!(left, vec![2]);
         let s = &restored[&k2];
         assert_eq!(s.columns.iter().map(|c| c.windows.clone()).collect::<Vec<_>>(), vec![vec![502], vec![501]]);
@@ -270,11 +309,46 @@ mod tests {
     #[test]
     fn id_reuse_by_other_app_is_not_matched() {
         let (strips, k) = sample();
-        let session = Session::capture(&strips, names);
+        let session = capture(&strips);
         let ws = vec![live(10, "com.other", "x", &k)];
-        let (restored, left) = session.restore(&ws);
+        let (restored, left) = session.restore(&ws, Mode::Scroll);
         assert!(restored.is_empty());
         assert_eq!(left, vec![0]);
+    }
+
+    #[test]
+    fn workspaces_and_split_mode_survive() {
+        let k3 = StripKey { workspace: 3, ..key("D1", 7) };
+        let mut s = Strip::with_mode(Mode::Split);
+        for id in [21, 22, 23] {
+            s.insert_window(id, 0.5, OpenAt::Next, true);
+        }
+        s.focus_window(22);
+        let active = HashMap::from([("D1".to_string(), 3u8)]);
+        let session = Session::capture(&HashMap::from([(k3.clone(), s)]), &active, names);
+        let json = serde_json::to_string(&session).unwrap();
+        let session: Session = serde_json::from_str(&json).unwrap();
+        assert_eq!(session.active.get("D1"), Some(&3));
+        // At startup every window is first assigned to workspace 1 (live key).
+        let live1 = key("D1", 7);
+        let ws: Vec<LiveWindow> =
+            [21, 22, 23].iter().map(|&id| live(id, "com.example.app", &format!("Doc {id}"), &live1)).collect();
+        let (restored, left) = session.restore(&ws, Mode::Scroll);
+        assert!(left.is_empty());
+        let s = &restored[&k3];
+        assert_eq!(s.mode, Mode::Split);
+        assert_eq!(s.windows().collect::<Vec<_>>(), vec![21, 22, 23]);
+        assert_eq!(s.focused_window(), Some(22));
+        s.check();
+    }
+
+    #[test]
+    fn old_files_without_mode_use_the_default() {
+        let json = r#"{"version":1,"strips":[{"key":{"display":"D1","space":7},"focus":0,
+            "columns":[{"width":0.5,"windows":[{"id":5,"app":"a","title":"t"}]}]}]}"#;
+        let session: Session = serde_json::from_str(json).unwrap();
+        let (restored, _) = session.restore(&[live(5, "a", "t", &key("D1", 7))], Mode::Split);
+        assert_eq!(restored[&key("D1", 7)].mode, Mode::Split);
     }
 
     #[test]
@@ -287,10 +361,10 @@ mod tests {
         s.stack_into(Side::Left); // [1] [2,3]
         s.focus_index(0);
         s.toggle_pin(Side::Left);
-        let session = Session::capture(&HashMap::from([(k.clone(), s)]), names);
+        let session = capture(&HashMap::from([(k.clone(), s)]));
         let other = key("D2", 5);
         let ws = vec![live(2, "com.example.app", "Doc 2", &k), live(3, "com.example.app", "Doc 3", &other)];
-        let (restored, _) = session.restore(&ws);
+        let (restored, _) = session.restore(&ws, Mode::Scroll);
         assert_eq!(restored[&k].columns[0].windows, vec![2]);
         assert_eq!(restored[&other].columns[0].windows, vec![3]);
         // Column 1 (pinned left) was lost; nothing else may inherit a stale pin.

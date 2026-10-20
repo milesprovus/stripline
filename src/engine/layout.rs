@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::geometry::Rect;
-use super::strip::{Side, Strip, WinId};
+use super::strip::{Mode, Side, Strip, WinId};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -248,6 +248,10 @@ pub fn place(
     min_widths: &HashMap<WinId, f64>,
 ) -> (Geometry, Vec<Placement>) {
     let geo = Geometry::new(strip, viewport, params.gap, min_widths);
+    if strip.mode == Mode::Split {
+        let out = strip.tree.layout(viewport, params.gap);
+        return (geo, out.into_iter().map(|(id, frame)| Placement { id, frame, parked: None }).collect());
+    }
     let mut out = Vec::with_capacity(strip.windows().count());
     let area = geo.area;
     let pinned_left = strip.columns.first().is_some_and(|c| c.pin == Some(Side::Left));
@@ -446,6 +450,18 @@ mod tests {
         let (geo, p) = place(&s, VP, &params(CenterMode::Never), Blocked::default(), &mins);
         assert_eq!(geo.widths[0], 600.0);
         assert_eq!(by_id(&p, 2).frame.x, 610.0);
+    }
+
+    #[test]
+    fn split_mode_fills_the_viewport() {
+        let mut s = strip(3, 0.5);
+        s.set_mode(Mode::Split, 0.5);
+        let (_, p) = place(&s, VP, &params(CenterMode::Never), Blocked::default(), &HashMap::new());
+        assert_eq!(p.len(), 3);
+        assert!(p.iter().all(|x| x.parked.is_none()));
+        assert_eq!(by_id(&p, 1).frame, Rect::new(0.0, 0.0, 495.0, 800.0));
+        let area: f64 = p.iter().map(|x| x.frame.w * x.frame.h).sum();
+        assert!(area > 0.95 * 1000.0 * 800.0, "split tiles cover the screen minus gaps");
     }
 
     #[test]

@@ -8,6 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::tree::Tree;
+
 /// Window identifier (the macOS `CGWindowID`).
 pub type WinId = u32;
 
@@ -100,6 +102,20 @@ impl Column {
     }
 }
 
+/// How a workspace arranges its windows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Mode {
+    /// Columns on a horizontal strip that scrolls.
+    #[default]
+    Scroll,
+    /// Windows split the screen between them (see `tree.rs`).
+    Split,
+}
+
+/// The windows of one workspace. In `Scroll` mode they live in `columns`; in
+/// `Split` mode in `tree`. The other container is always empty, so the
+/// mode-independent methods below can simply look at both.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Strip {
     pub columns: Vec<Column>,
@@ -107,11 +123,49 @@ pub struct Strip {
     /// Current horizontal scroll of the flowing (unpinned) columns, in pixels.
     #[serde(default)]
     pub scroll: f64,
+    #[serde(default)]
+    pub mode: Mode,
+    #[serde(default)]
+    pub tree: Tree,
 }
 
 impl Strip {
+    pub fn with_mode(mode: Mode) -> Strip {
+        Strip { mode, ..Strip::default() }
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.columns.is_empty()
+        self.columns.is_empty() && self.tree.is_empty()
+    }
+
+    #[cfg(test)]
+    pub fn contains(&self, win: WinId) -> bool {
+        self.find(win).is_some() || self.tree.contains(win)
+    }
+
+    /// Switch layout, keeping the windows in reading order and the focus.
+    /// Columns created from a split layout get `width`.
+    pub fn set_mode(&mut self, mode: Mode, width: f64) -> bool {
+        if mode == self.mode {
+            return false;
+        }
+        let focus = self.focused_window();
+        let order: Vec<WinId> = self.windows().collect();
+        self.mode = mode;
+        match mode {
+            Mode::Split => {
+                self.columns.clear();
+                self.focus = 0;
+                self.scroll = 0.0;
+                self.tree = Tree::from_windows(&order, focus);
+            }
+            Mode::Scroll => {
+                self.tree = Tree::default();
+                self.columns = order.iter().map(|&w| Column::new(w, width)).collect();
+                self.focus = focus.and_then(|f| order.iter().position(|&w| w == f)).unwrap_or(0);
+            }
+        }
+        true
     }
 
     pub fn len(&self) -> usize {
@@ -119,7 +173,7 @@ impl Strip {
     }
 
     pub fn windows(&self) -> impl Iterator<Item = WinId> + '_ {
-        self.columns.iter().flat_map(|c| c.windows.iter().copied())
+        self.columns.iter().flat_map(|c| c.windows.iter().copied()).chain(self.tree.windows())
     }
 
     pub fn find(&self, win: WinId) -> Option<(usize, usize)> {
@@ -135,7 +189,10 @@ impl Strip {
     }
 
     pub fn focused_window(&self) -> Option<WinId> {
-        self.focused_column().map(Column::active_window)
+        match self.mode {
+            Mode::Scroll => self.focused_column().map(Column::active_window),
+            Mode::Split => self.tree.focus,
+        }
     }
 
     /// Indices of the columns that scroll (everything except pinned ones).
@@ -168,6 +225,10 @@ impl Strip {
 
     /// Add a window in a new column. Returns the column index.
     pub fn insert_window(&mut self, win: WinId, width: f64, at: OpenAt, focus: bool) -> usize {
+        if self.mode == Mode::Split {
+            self.tree.insert(win, focus);
+            return 0;
+        }
         let idx = match at {
             OpenAt::Next if self.columns.is_empty() => 0,
             OpenAt::Next => self.focus + 1,
@@ -180,13 +241,17 @@ impl Strip {
     /// Add a window in a new column at an exact index (used by drag and drop
     /// and display moves).
     pub fn insert_window_at(&mut self, win: WinId, width: f64, idx: usize, focus: bool) -> usize {
+        if self.mode == Mode::Split {
+            self.tree.insert(win, focus);
+            return 0;
+        }
         self.insert_column(idx, Column::new(win, width), focus)
     }
 
     /// Remove a window. Empty columns disappear; focus moves to the column that
     /// takes the removed one's place, or to its left neighbour at the end.
     pub fn remove_window(&mut self, win: WinId) -> bool {
-        let Some((c, r)) = self.find(win) else { return false };
+        let Some((c, r)) = self.find(win) else { return self.tree.remove(win) };
         self.columns[c].remove_at(r);
         if self.columns[c].is_empty() {
             self.columns.remove(c);
@@ -201,7 +266,7 @@ impl Strip {
     // ---- focus ---------------------------------------------------------
 
     pub fn focus_window(&mut self, win: WinId) -> bool {
-        let Some((c, r)) = self.find(win) else { return false };
+        let Some((c, r)) = self.find(win) else { return self.tree.focus_window(win) };
         let changed = self.focus != c || self.columns[c].active != r;
         self.focus = c;
         self.columns[c].active = r;
@@ -498,6 +563,11 @@ impl Strip {
         if !self.columns.is_empty() {
             assert!(self.focus < self.columns.len());
         }
+        match self.mode {
+            Mode::Scroll => assert!(self.tree.is_empty(), "scroll mode with a tree"),
+            Mode::Split => assert!(self.columns.is_empty(), "split mode with columns"),
+        }
+        self.tree.check();
     }
 }
 
@@ -691,6 +761,28 @@ mod tests {
     }
 
     #[test]
+    fn switching_modes_keeps_order_and_focus() {
+        let mut s = strip(&[1, 2, 3]);
+        s.focus_index(1);
+        assert!(s.set_mode(Mode::Split, 0.5));
+        assert!(!s.set_mode(Mode::Split, 0.5));
+        assert_eq!(s.windows().collect::<Vec<_>>(), vec![1, 2, 3]);
+        assert_eq!(s.focused_window(), Some(2));
+        // Generic operations work on the tree.
+        s.insert_window(4, 0.5, OpenAt::Next, true);
+        assert!(s.contains(4) && s.columns.is_empty());
+        assert!(s.remove_window(1));
+        assert!(s.focus_window(3));
+        s.check();
+        assert!(s.set_mode(Mode::Scroll, 0.4));
+        // 4 split the focused window 2, so it follows 2 in reading order.
+        assert_eq!(order(&s), vec![vec![2], vec![4], vec![3]]);
+        assert_eq!(s.focused_window(), Some(3));
+        assert!(s.columns.iter().all(|c| c.width == 0.4));
+        s.check();
+    }
+
+    #[test]
     fn drop_window_onto_column() {
         let mut s = strip(&[1, 2, 3]);
         assert!(s.move_window_to_column(1, 2));
@@ -766,6 +858,10 @@ mod tests {
                 12 => {
                     s.insert_window(next_id, 0.3, OpenAt::End, false);
                     next_id += 1;
+                    if rnd(20) == 0 {
+                        let m = if s.mode == Mode::Scroll { Mode::Split } else { Mode::Scroll };
+                        s.set_mode(m, 0.5);
+                    }
                 }
                 _ => {
                     s.insert_window(next_id, 0.3, OpenAt::Start, true);

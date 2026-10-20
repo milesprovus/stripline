@@ -27,11 +27,14 @@ use super::ffi::{AXObserverRef, AXUIElementRef, Pid, AX_ERR_CANNOT_COMPLETE, AX_
 use super::keymap;
 use super::menu;
 use super::observer::AppObserver;
-use crate::action::Action;
+use super::sink::FocusSink;
+use crate::action::{Action, MAX_WORKSPACE};
 use crate::config::{self, Config, RuleEffect, Rules};
 use crate::engine::session::{LiveWindow, Session};
 use crate::engine::strip::{MAX_WIDTH, MIN_WIDTH};
-use crate::engine::{place, Blocked, Geometry, LayoutParams, OpenAt, Rect, Side, Spring, Strip, StripKey, WinId};
+use crate::engine::{
+    place, Axis, Blocked, Geometry, LayoutParams, Mode, OpenAt, Rect, Side, Spring, Strip, StripKey, WinId,
+};
 use crate::ipc;
 use crate::keys::Mods;
 
@@ -221,6 +224,15 @@ pub struct Wm {
     /// Actual sizes read back after resizing (apps may round them).
     sizes: HashMap<WinId, (f64, f64)>,
     border: Option<Border>,
+    /// Workspace shown on each display (by display UUID).
+    active_ws: HashMap<String, u8>,
+    /// Workspaces from the session file, used when displays first appear.
+    saved_active: std::collections::BTreeMap<String, u8>,
+    /// When Stripline last switched workspaces (to ignore stale focus events).
+    ws_switched_at: Option<Instant>,
+    /// Workspace number shown in the menu bar.
+    shown_ws: u8,
+    sink: Option<FocusSink>,
 }
 
 impl Wm {
@@ -261,6 +273,11 @@ impl Wm {
             cfg_error,
             sizes: HashMap::new(),
             border: None,
+            active_ws: HashMap::new(),
+            saved_active: Default::default(),
+            ws_switched_at: None,
+            shown_ws: 0,
+            sink: None,
         }
     }
 
@@ -275,6 +292,8 @@ impl Wm {
         if let Err(e) = eventtap::install() {
             log::error!("{e}");
         }
+        let session = load_session();
+        self.saved_active = session.active.clone();
         self.refresh_displays();
 
         // Collect every window first so the saved layout can be rebuilt in one go.
@@ -289,7 +308,7 @@ impl Wm {
                 LiveWindow { id: *id, app, title, key: key.clone() }
             })
             .collect();
-        let (strips, leftovers) = load_session().restore(&live);
+        let (strips, leftovers) = session.restore(&live, self.cfg.layout.default_mode);
         for (key, strip) in strips {
             for id in strip.windows() {
                 if let Some(w) = self.windows.get_mut(&id) {
@@ -304,6 +323,8 @@ impl Wm {
         }
         self.sync_focus(false);
         self.settle_all(false);
+        let ws = self.current_display().map_or(1, |d| self.ws_of(&d.uuid));
+        self.show_ws(ws);
         let n = self.windows.values().filter(|w| matches!(w.state, WinState::Tiled(_))).count();
         log::info!("managing {n} windows on {} displays", self.displays.len());
         self.housekeeping();
@@ -393,11 +414,11 @@ impl Wm {
         } else if effect.float == Some(true) {
             WinState::Floating(Float::Rule)
         } else if effect.float == Some(false) {
-            WinState::Tiled(StripKey { display: String::new(), space: 0 })
+            WinState::Tiled(StripKey { display: String::new(), space: 0, workspace: 0 })
         } else if subrole != ax::SUBROLE_STANDARD || !el.settable(attr::SIZE) || zoom_disabled(&el) {
             WinState::Floating(Float::Auto)
         } else {
-            WinState::Tiled(StripKey { display: String::new(), space: 0 })
+            WinState::Tiled(StripKey { display: String::new(), space: 0, workspace: 0 })
         };
 
         let observer = &app._observer;
@@ -449,7 +470,7 @@ impl Wm {
     fn tile(&mut self, id: WinId, key: StripKey, effect: RuleEffect, focus: bool) {
         let width = effect.width.unwrap_or(self.cfg.layout.default_width);
         let at = effect.open_at.unwrap_or(self.cfg.layout.open_at);
-        self.strips.entry(key.clone()).or_default().insert_window(id, width, at, focus);
+        self.strip_entry(&key).insert_window(id, width, at, focus);
         if let Some(w) = self.windows.get_mut(&id) {
             w.state = WinState::Tiled(key.clone());
         }
@@ -532,6 +553,7 @@ impl Wm {
         for d in &mut self.displays {
             d.space = if separate { self.spaces.current.get(&d.uuid).copied().unwrap_or(0) } else { main_space };
         }
+        self.assign_workspaces();
     }
 
     fn display(&self, uuid: &str) -> Option<&Display> {
@@ -559,9 +581,15 @@ impl Wm {
             .any(|d| d.eq_ignore_ascii_case(uuid) || (!name.is_empty() && d.eq_ignore_ascii_case(name)))
     }
 
-    fn is_visible(&self, key: &StripKey) -> bool {
+    /// The strip's display is managed and showing its macOS Space.
+    fn space_visible(&self, key: &StripKey) -> bool {
         self.display(&key.display).is_some_and(|d| d.space == key.space || d.space == 0 || key.space == 0)
             && self.display_enabled(&key.display)
+    }
+
+    /// ... and its workspace is the one shown on that display.
+    fn is_visible(&self, key: &StripKey) -> bool {
+        self.space_visible(key) && self.ws_of(&key.display) == key.workspace
     }
 
     fn key_for(&self, id: WinId, frame: Option<Rect>) -> StripKey {
@@ -577,12 +605,13 @@ impl Wm {
             .or_else(|| self.displays.first().map(|d| d.uuid.clone()))
             .unwrap_or_default();
         let space = if space != 0 { space } else { self.display(&uuid).map_or(0, |d| d.space) };
-        StripKey { display: uuid, space }
+        let workspace = self.ws_of(&uuid);
+        StripKey { display: uuid, space, workspace }
     }
 
     fn key_at(&self, x: f64, y: f64) -> Option<StripKey> {
         let d = self.display_near(x, y)?;
-        self.display_enabled(&d.uuid).then(|| StripKey { display: d.uuid.clone(), space: d.space })
+        self.display_enabled(&d.uuid).then(|| self.shown_key(d, self.ws_of(&d.uuid)))
     }
 
     /// Enabled displays, left to right.
@@ -623,10 +652,10 @@ impl Wm {
             let display_gone = self.display(&key.display).is_none();
             let space = display::spaces_for_window(*id).first().copied().unwrap_or(0);
             let new_key = if display_gone {
-                self.key_for(*id, w.el.frame())
+                StripKey { workspace: key.workspace, ..self.key_for(*id, w.el.frame()) }
             } else if space != 0 && space != key.space {
                 let display = if separate { self.spaces.owner.get(&space).cloned() } else { None };
-                StripKey { display: display.unwrap_or_else(|| key.display.clone()), space }
+                StripKey { display: display.unwrap_or_else(|| key.display.clone()), space, workspace: key.workspace }
             } else {
                 continue;
             };
@@ -640,7 +669,7 @@ impl Wm {
             }
             self.dirty.insert(old);
             let width = self.cfg.layout.default_width;
-            self.strips.entry(new.clone()).or_default().insert_window(id, width, OpenAt::End, false);
+            self.strip_entry(&new).insert_window(id, width, OpenAt::End, false);
             if let Some(w) = self.windows.get_mut(&id) {
                 w.state = WinState::Tiled(new.clone());
             }
@@ -732,6 +761,260 @@ impl Wm {
             self.request_frame();
         }
         self.update_border();
+        let ws = self.focused.and_then(|id| match &self.windows.get(&id)?.state {
+            WinState::Tiled(k) => Some(k.workspace),
+            _ => None,
+        });
+        if let Some(ws) = ws {
+            self.show_ws(ws);
+        }
+    }
+
+    fn show_ws(&mut self, n: u8) {
+        if n != self.shown_ws {
+            self.shown_ws = n;
+            menu::set_workspace(n);
+        }
+    }
+
+    // ---- workspaces --------------------------------------------------------
+
+    fn ws_of(&self, display: &str) -> u8 {
+        self.active_ws.get(display).copied().unwrap_or(1)
+    }
+
+    /// Give every display a workspace to show: the saved one when possible,
+    /// otherwise the lowest number not shown elsewhere.
+    fn assign_workspaces(&mut self) {
+        let live: Vec<String> = self.displays.iter().map(|d| d.uuid.clone()).collect();
+        self.active_ws.retain(|k, _| live.contains(k));
+        for uuid in live {
+            if self.active_ws.contains_key(&uuid) {
+                continue;
+            }
+            let taken: HashSet<u8> = self.active_ws.values().copied().collect();
+            let n = self
+                .saved_active
+                .get(&uuid)
+                .copied()
+                .filter(|n| !taken.contains(n) && (1..=MAX_WORKSPACE).contains(n))
+                .or_else(|| (1..=MAX_WORKSPACE).find(|n| !taken.contains(n)))
+                .unwrap_or(1);
+            self.active_ws.insert(uuid, n);
+        }
+    }
+
+    /// The strip for workspace `n` on a display's current Space.
+    fn shown_key(&self, d: &Display, n: u8) -> StripKey {
+        StripKey { display: d.uuid.clone(), space: d.space, workspace: n }
+    }
+
+    fn strip_entry(&mut self, key: &StripKey) -> &mut Strip {
+        let mode = self.cfg.layout.default_mode;
+        self.strips.entry(key.clone()).or_insert_with(|| Strip::with_mode(mode))
+    }
+
+    /// Non-empty strips holding workspace `n`.
+    fn ws_keys(&self, n: u8) -> Vec<StripKey> {
+        self.strips.iter().filter(|(k, s)| k.workspace == n && !s.is_empty()).map(|(k, _)| k.clone()).collect()
+    }
+
+    /// Display showing workspace `n`, if any.
+    fn display_showing(&self, n: u8) -> Option<String> {
+        self.active_ws.iter().find(|(u, &w)| w == n && self.display(u).is_some()).map(|(u, _)| u.clone())
+    }
+
+    fn current_display(&self) -> Option<Display> {
+        let uuid = self.active_key().map(|k| k.display)?;
+        self.display(&uuid).cloned()
+    }
+
+    /// Park every window of a workspace that is not on screen.
+    fn hide(&mut self, key: &StripKey, display: &Display) {
+        let Some(strip) = self.strips.get(key) else { return };
+        let blocked = self.blocked(display);
+        let ids: Vec<WinId> = strip.windows().collect();
+        let mut dead = Vec::new();
+        for id in ids {
+            if self.parked.contains(&id) {
+                continue;
+            }
+            let Some(win) = self.windows.get(&id) else { continue };
+            let (w, h) = self
+                .sizes
+                .get(&id)
+                .copied()
+                .or_else(|| self.applied.get(&id).map(|r| (r.w, r.h)))
+                .or_else(|| win.el.size().map(|s| (s.width, s.height)))
+                .unwrap_or((800.0, 600.0));
+            let t = park_rect(display, blocked, Rect::new(0.0, 0.0, w, h), Side::Right);
+            let (x, y) = (t.x.round(), t.y.round());
+            if win.el.set_position(x, y) == AX_ERR_INVALID_ELEMENT {
+                dead.push(id);
+                continue;
+            }
+            self.applied.insert(id, Rect::new(x, y, w, h));
+            self.parked.insert(id);
+        }
+        for id in dead {
+            self.forget_window(id);
+        }
+    }
+
+    /// Move a whole workspace strip to another key (another display).
+    fn move_strip(&mut self, from: &StripKey, to: StripKey) {
+        let Some(strip) = self.strips.remove(from) else { return };
+        let ids: Vec<WinId> = strip.windows().collect();
+        for id in &ids {
+            if let Some(w) = self.windows.get_mut(id) {
+                w.state = WinState::Tiled(to.clone());
+            }
+            self.applied.remove(id);
+            self.parked.remove(id);
+        }
+        let width = self.cfg.layout.default_width;
+        match self.strips.get_mut(&to) {
+            Some(existing) if !existing.is_empty() => {
+                for id in ids {
+                    existing.insert_window(id, width, OpenAt::End, false);
+                }
+            }
+            _ => {
+                self.strips.insert(to.clone(), strip);
+            }
+        }
+        self.dirty.insert(to);
+    }
+
+    /// Show workspace `n`. If another display shows it, go there; otherwise
+    /// show it on the current display, bringing its windows along.
+    fn switch_workspace(&mut self, n: u8) -> Result<String, String> {
+        let here = self.current_display().or_else(|| self.displays.first().cloned()).ok_or("no display")?;
+        if let Some(uuid) = self.display_showing(n) {
+            let d = self.display(&uuid).cloned().ok_or("display gone")?;
+            let other_display = uuid != here.uuid;
+            self.focus_workspace(&d, n, other_display);
+            return Ok(format!("workspace {n}"));
+        }
+        for k in self.ws_keys(n) {
+            // Only windows on a Space that is on screen can be carried over.
+            if k.display != here.uuid && self.space_visible(&k) {
+                let to = StripKey { display: here.uuid.clone(), space: here.space, workspace: n };
+                self.move_strip(&k, to);
+            }
+        }
+        let old = self.ws_of(&here.uuid);
+        self.active_ws.insert(here.uuid.clone(), n);
+        self.ws_switched_at = Some(Instant::now());
+        let keys: Vec<StripKey> = self
+            .strips
+            .keys()
+            .filter(|k| k.display == here.uuid && (k.workspace == old || k.workspace == n))
+            .cloned()
+            .collect();
+        for k in keys {
+            if k.workspace == n {
+                self.settle(&k, false);
+            }
+            self.dirty.insert(k);
+        }
+        // Apply now: show the new windows and park the old ones in one go.
+        self.frame();
+        self.focus_workspace(&here, n, false);
+        self.session_dirty = true;
+        Ok(format!("workspace {n}"))
+    }
+
+    /// Focus workspace `n` on display `d`: its focused window, or nothing.
+    fn focus_workspace(&mut self, d: &Display, n: u8, warp: bool) {
+        let key = self.shown_key(d, n);
+        match self.strips.get(&key).and_then(Strip::focused_window) {
+            Some(id) => {
+                self.focus_os(id);
+                self.warp_to(id, warp);
+            }
+            None => {
+                self.set_focused(None);
+                let primary_height = self.displays.first().map_or(0.0, |d| d.frame.h);
+                let sink = self.sink.get_or_insert_with(|| FocusSink::new(self.mtm));
+                sink.take_focus(self.mtm, d.visible, primary_height);
+                if warp {
+                    let (cx, cy) = d.visible.center();
+                    display::warp_mouse(cx, cy);
+                }
+            }
+        }
+        self.show_ws(n);
+    }
+
+    /// Move the focused window to workspace `n`, then follow it or stay.
+    fn move_to_workspace(&mut self, n: u8, follow: bool) -> Result<String, String> {
+        let id = self.os_focused_id().ok_or("no focused window")?;
+        let Some(WinState::Tiled(key)) = self.windows.get(&id).map(|w| w.state.clone()) else {
+            return Err("focused window is not tiled".into());
+        };
+        if key.workspace == n {
+            return Ok(format!("already on workspace {n}"));
+        }
+        // Workspace n lives where it is shown, else where its windows are, else here.
+        let uuid = self
+            .display_showing(n)
+            .or_else(|| self.ws_keys(n).first().map(|k| k.display.clone()))
+            .unwrap_or_else(|| key.display.clone());
+        let d = self.display(&uuid).cloned().ok_or("display gone")?;
+        let target = self.shown_key(&d, n);
+        let width = self
+            .strips
+            .get(&key)
+            .and_then(|s| s.find(id).map(|(c, _)| s.columns[c].width))
+            .unwrap_or(self.cfg.layout.default_width);
+        self.untile(id);
+        self.strip_entry(&target).insert_window(id, width, OpenAt::Next, true);
+        if let Some(w) = self.windows.get_mut(&id) {
+            w.state = WinState::Tiled(target.clone());
+        }
+        self.settle(&target, false);
+        self.session_dirty = true;
+        if follow {
+            self.switch_workspace(n)?;
+            self.focus_os(id);
+        } else {
+            self.frame();
+            let here = self.display(&key.display).cloned().ok_or("display gone")?;
+            self.focus_workspace(&here, key.workspace, false);
+        }
+        Ok(format!("moved to workspace {n}"))
+    }
+
+    /// Next/previous workspace that has windows (or is the current one).
+    fn cycle_workspace(&mut self, forward: bool) -> Result<String, String> {
+        let here = self.current_display().ok_or("no display")?;
+        let cur = self.ws_of(&here.uuid);
+        let usable: Vec<u8> = (1..=MAX_WORKSPACE)
+            .filter(|&n| {
+                n == cur || (!self.ws_keys(n).is_empty() && self.display_showing(n).is_none_or(|u| u == here.uuid))
+            })
+            .collect();
+        let i = usable.iter().position(|&n| n == cur).unwrap_or(0);
+        let j = if forward { (i + 1) % usable.len() } else { (i + usable.len() - 1) % usable.len() };
+        if usable[j] == cur {
+            return Ok("no other workspace has windows".into());
+        }
+        self.switch_workspace(usable[j])
+    }
+
+    fn toggle_layout(&mut self) -> Result<String, String> {
+        let key = self.active_key().ok_or("no workspace here")?;
+        let width = self.cfg.layout.default_width;
+        let strip = self.strip_entry(&key);
+        let mode = if strip.mode == Mode::Scroll { Mode::Split } else { Mode::Scroll };
+        strip.set_mode(mode, width);
+        for id in self.strips[&key].windows().collect::<Vec<_>>() {
+            self.min_widths.remove(&id);
+        }
+        self.settle(&key, false);
+        self.session_dirty = true;
+        Ok(format!("workspace {} layout: {}", key.workspace, if mode == Mode::Split { "split" } else { "scroll" }))
     }
 
     // ---- focus border ----------------------------------------------------
@@ -784,10 +1067,14 @@ impl Wm {
 
     /// Push the strip's computed frames to the windows.
     fn apply(&mut self, key: &StripKey) {
-        if !self.enabled || !self.is_visible(key) {
+        if !self.enabled || !self.space_visible(key) {
             return;
         }
         let Some(display) = self.display(&key.display).cloned() else { return };
+        if self.ws_of(&key.display) != key.workspace {
+            self.hide(key, &display);
+            return;
+        }
         let Some(strip) = self.strips.get(key) else { return };
         let viewport = self.viewport(&display);
         let blocked = self.blocked(&display);
@@ -952,7 +1239,16 @@ impl Wm {
         let from_mouse = self.ffm_target.take() == Some(id);
         let WinState::Tiled(key) = self.windows[&id].state.clone() else { return };
         let Some(strip) = self.strips.get_mut(&key) else { return };
-        if strip.focus_window(id) {
+        let changed = strip.focus_window(id);
+        if !self.is_visible(&key) && self.space_visible(&key) {
+            // Cmd-Tab or the Dock picked a window on a hidden workspace: show it.
+            let stale = self.ws_switched_at.is_some_and(|t| t.elapsed() < Duration::from_millis(400));
+            if !stale {
+                let _ = self.switch_workspace(key.workspace);
+            }
+            return;
+        }
+        if changed {
             self.session_dirty = true;
             if scroll && !from_mouse {
                 self.settle(&key, true);
@@ -1001,16 +1297,53 @@ impl Wm {
             Action::SendToPrevDisplay => return self.send_to_display(false),
             Action::FocusNextDisplay => return self.focus_display(true),
             Action::FocusPrevDisplay => return self.focus_display(false),
+            Action::Workspace(n) => return self.switch_workspace(n),
+            Action::MoveToWorkspace(n) => return self.move_to_workspace(n, true),
+            Action::MoveToWorkspaceSilent(n) => return self.move_to_workspace(n, false),
+            Action::NextWorkspace => return self.cycle_workspace(true),
+            Action::PrevWorkspace => return self.cycle_workspace(false),
+            Action::ToggleLayout => return self.toggle_layout(),
             _ => {}
         }
 
         let key = self.active_key().ok_or("no strip here")?;
+        let vp = self.display(&key.display).map(|d| self.viewport(d)).ok_or("display gone")?;
         let l = &self.cfg.layout;
-        let (presets, wstep, hstep) = (l.width_presets.clone(), l.width_step, l.height_step);
-        let strip = self.strips.get_mut(&key).filter(|s| !s.is_empty()).ok_or("no windows on this strip")?;
+        let (presets, wstep, hstep, gap) = (l.width_presets.clone(), l.width_step, l.height_step, l.gap);
+        let strip = self.strips.get_mut(&key).filter(|s| !s.is_empty()).ok_or("no windows on this workspace")?;
         let before = strip.focused_window();
-        let mut resized = false;
         use Action::*;
+        if strip.mode == Mode::Split {
+            let t = &mut strip.tree;
+            let changed = match a {
+                Focus(d) => t.focus_dir(d, vp, gap),
+                Move(d) => t.swap_dir(d, vp, gap),
+                FocusFirst => t.focus_index(0),
+                FocusLast => t.focus_index(t.windows().len().saturating_sub(1)),
+                FocusColumn(n) => t.focus_index(n - 1),
+                Wider => t.resize(Axis::Horizontal, wstep, false, vp, gap),
+                Narrower => t.resize(Axis::Horizontal, -wstep, false, vp, gap),
+                Taller => t.resize(Axis::Vertical, hstep, false, vp, gap),
+                Shorter => t.resize(Axis::Vertical, -hstep, false, vp, gap),
+                EqualizeHeights => t.equalize(),
+                ToggleSplit => t.toggle_axis(vp, gap),
+                _ => return Err(format!("'{a}' is for the scrolling layout (switch with toggle-layout)")),
+            };
+            let after = t.focus;
+            if changed {
+                self.session_dirty = true;
+                self.dirty.insert(key);
+                self.request_frame();
+            }
+            if let Some(id) = after {
+                if after != before || self.os_focused_id() != Some(id) {
+                    self.focus_os(id);
+                    self.warp_to(id, false);
+                }
+            }
+            return Ok(if changed { "ok" } else { "nothing to do" }.into());
+        }
+        let mut resized = false;
         let changed = match a {
             Focus(d) => strip.focus_dir(d),
             FocusFirst => strip.focus_first(),
@@ -1140,7 +1473,7 @@ impl Wm {
         }
         let i = order.iter().position(|d| d.uuid == key.display).unwrap_or(0);
         let j = if next { (i + 1) % order.len() } else { (i + order.len() - 1) % order.len() };
-        let target = StripKey { display: order[j].uuid.clone(), space: order[j].space };
+        let target = self.shown_key(&order[j], self.ws_of(&order[j].uuid));
         let width = self
             .strips
             .get(&key)
@@ -1148,7 +1481,7 @@ impl Wm {
             .unwrap_or(self.cfg.layout.default_width);
         self.untile(id);
         self.min_widths.remove(&id);
-        self.strips.entry(target.clone()).or_default().insert_window(id, width, OpenAt::Next, true);
+        self.strip_entry(&target).insert_window(id, width, OpenAt::Next, true);
         if let Some(w) = self.windows.get_mut(&id) {
             w.state = WinState::Tiled(target.clone());
         }
@@ -1168,7 +1501,7 @@ impl Wm {
         let i = order.iter().position(|d| d.uuid == cur).unwrap_or(0);
         let j = if next { (i + 1) % order.len() } else { (i + order.len() - 1) % order.len() };
         let d = &order[j];
-        let key = StripKey { display: d.uuid.clone(), space: d.space };
+        let key = self.shown_key(d, self.ws_of(&d.uuid));
         match self.strips.get(&key).and_then(Strip::focused_window) {
             Some(id) => {
                 self.focus_os(id);
@@ -1446,6 +1779,25 @@ impl Wm {
         let size = self.windows.get(&id).and_then(|w| w.el.size());
         let geo = self.geometry(key);
         let gap = self.cfg.layout.gap;
+        if let (Some(size), Some((vp, _)), Some(strip)) = (size, &geo, self.strips.get_mut(key)) {
+            if strip.mode == Mode::Split {
+                // Move the enclosing splits by however much the window changed.
+                let t = &mut strip.tree;
+                if let Some(&(_, old)) = t.layout(*vp, gap).iter().find(|(w, _)| *w == id) {
+                    t.focus_window(id);
+                    let (dw, dh) = (size.width - old.w, size.height - old.h);
+                    if dw.abs() > 2.0 {
+                        t.resize(Axis::Horizontal, dw, true, *vp, gap);
+                    }
+                    if dh.abs() > 2.0 {
+                        t.resize(Axis::Vertical, dh, true, *vp, gap);
+                    }
+                }
+                self.dirty.insert(key.clone());
+                self.request_frame();
+                return;
+            }
+        }
         if let (Some(size), Some((vp, geo)), Some(strip)) = (size, geo, self.strips.get_mut(key)) {
             if let Some((c, _)) = strip.find(id) {
                 let avail = if strip.columns[c].pin.is_some() { vp.w } else { geo.area.w };
@@ -1466,6 +1818,17 @@ impl Wm {
         let gap = self.cfg.layout.gap;
         let target = self.key_at(x, y);
         match target {
+            Some(t) if t == *key && self.strips.get(key).is_some_and(|s| s.mode == Mode::Split) => {
+                // Dropped onto another tile: swap the two.
+                if let (Some((vp, _)), Some(strip)) = (self.geometry(key), self.strips.get_mut(key)) {
+                    let other = strip.tree.layout(vp, gap).into_iter().find(|(w, r)| *w != id && r.contains(x, y));
+                    if let Some((other, _)) = other {
+                        strip.tree.swap(id, other);
+                    }
+                }
+                self.dirty.insert(key.clone());
+                self.request_frame();
+            }
             Some(t) if t == *key => {
                 if let (Some((vp, geo)), Some(strip)) = (self.geometry(key), self.strips.get(key)) {
                     let to = geo.column_at(strip, vp, gap, x);
@@ -1489,7 +1852,7 @@ impl Wm {
                     .and_then(|s| s.find(id).map(|(c, _)| s.columns[c].width))
                     .unwrap_or(self.cfg.layout.default_width);
                 self.untile(id);
-                self.strips.entry(t.clone()).or_default();
+                self.strip_entry(&t);
                 let idx = match (self.geometry(&t), self.strips.get(&t)) {
                     (Some((vp, geo)), Some(s)) => geo.insert_index_at(s, vp, gap, x),
                     _ => 0,
@@ -1541,7 +1904,8 @@ impl Wm {
         }
         let Some(key) = self.gesture.key.clone() else {
             let (mx, my) = display::mouse_location();
-            match self.key_at(mx, my).filter(|k| self.strips.get(k).is_some_and(|s| !s.is_empty())) {
+            let scrolls = |k: &StripKey| self.strips.get(k).is_some_and(|s| !s.is_empty() && s.mode == Mode::Scroll);
+            match self.key_at(mx, my).filter(scrolls) {
                 Some(key) => {
                     // Catch the strip where it is if it was still moving.
                     if let Some((s, t0)) = self.anims.remove(&key) {
@@ -1654,7 +2018,7 @@ impl Wm {
     }
 
     fn save_session(&mut self) {
-        let session = Session::capture(&self.strips, |id| self.describe(id));
+        let session = Session::capture(&self.strips, &self.active_ws, |id| self.describe(id));
         let dir = config::data_dir();
         let result = std::fs::create_dir_all(&dir).and_then(|()| {
             std::fs::write(dir.join("session.json"), serde_json::to_vec_pretty(&session).unwrap_or_default())
@@ -1710,7 +2074,13 @@ impl Wm {
                 json!({
                     "display": self.display(&k.display).map_or(k.display.clone(), |d| d.name.clone()),
                     "space": k.space,
+                    "workspace": k.workspace,
+                    "mode": s.mode,
                     "visible": self.is_visible(k),
+                    "windows": s.windows().map(|id| {
+                        let (app, title) = self.describe(id);
+                        json!({ "id": id, "app": app, "title": title })
+                    }).collect::<Vec<_>>(),
                     "scroll": s.scroll.round(),
                     "focus": s.focus,
                     "columns": s.columns.iter().map(|c| json!({
@@ -1734,8 +2104,14 @@ impl Wm {
                 json!({ "id": id, "app": app, "title": title, "reason": format!("{:?}", w.state) })
             })
             .collect();
+        let workspaces: serde_json::Map<String, serde_json::Value> = self
+            .active_ws
+            .iter()
+            .map(|(u, n)| (self.display(u).map_or(u.clone(), |d| d.name.clone()), json!(n)))
+            .collect();
         serde_json::to_string_pretty(&json!({
             "enabled": self.enabled,
+            "workspaces": workspaces,
             "strips": strips,
             "floating": floating,
         }))

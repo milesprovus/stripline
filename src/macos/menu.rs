@@ -5,7 +5,9 @@ use std::cell::RefCell;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{define_class, msg_send, sel, MainThreadOnly};
-use objc2_app_kit::{NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength};
+use objc2_app_kit::{
+    NSCellImagePosition, NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+};
 use objc2_foundation::{ns_string, MainThreadMarker, NSDate, NSDateFormatter, NSDateFormatterStyle, NSString};
 
 use super::wm;
@@ -63,7 +65,10 @@ impl MenuTarget {
 }
 
 struct Menu {
-    _item: Retained<NSStatusItem>,
+    mtm: MainThreadMarker,
+    item: Retained<NSStatusItem>,
+    /// False when the SF Symbol was unavailable and the title is the icon.
+    has_image: bool,
     _target: Retained<MenuTarget>,
     toggle: Retained<NSMenuItem>,
     /// Disabled line at the top showing the result of the last config load.
@@ -98,12 +103,17 @@ fn add(
 
 pub fn install(mtm: MainThreadMarker) {
     let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
+    let mut has_image = false;
     if let Some(button) = item.button(mtm) {
         match NSImage::imageWithSystemSymbolName_accessibilityDescription(
             ns_string!("rectangle.split.3x1"),
             Some(ns_string!("Stripline")),
         ) {
-            Some(img) => button.setImage(Some(&img)),
+            Some(img) => {
+                button.setImage(Some(&img));
+                button.setImagePosition(NSCellImagePosition::ImageLeft);
+                has_image = true;
+            }
             None => button.setTitle(ns_string!("▥")),
         }
     }
@@ -121,7 +131,7 @@ pub fn install(mtm: MainThreadMarker) {
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     add(&menu, &target, "Quit Stripline", sel!(quit:), mtm);
     item.setMenu(Some(&menu));
-    MENU.with(|m| *m.borrow_mut() = Some(Menu { _item: item, _target: target, toggle, status }));
+    MENU.with(|m| *m.borrow_mut() = Some(Menu { mtm, item, has_image, _target: target, toggle, status }));
 }
 
 pub fn set_paused(paused: bool) {
@@ -154,6 +164,18 @@ pub fn set_config_status(result: Result<usize, &str>) {
         if let Some(m) = m.borrow().as_ref() {
             m.status.setTitle(&NSString::from_str(&title));
             m.status.setToolTip(tip.as_deref().map(NSString::from_str).as_deref());
+        }
+    });
+}
+
+/// Show the current workspace number next to the menu bar icon.
+pub fn set_workspace(n: u8) {
+    MENU.with(|m| {
+        if let Some(m) = m.borrow().as_ref() {
+            if let Some(button) = m.item.button(m.mtm) {
+                let title = if m.has_image { format!(" {n}") } else { format!("▥ {n}") };
+                button.setTitle(&NSString::from_str(&title));
+            }
         }
     });
 }
