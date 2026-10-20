@@ -55,9 +55,10 @@ Each workspace can use either layout; ⌃⌥S switches the current one.
 | Focus border | A coloured line around the focused window. Colour, thickness, corner radius, offset and an optional glow are configurable. |
 | Mouse | Drag a window onto another column to reorder or stack. Drag its edge to change the column width. Optional focus-follows-mouse and mouse-follows-focus. |
 | Session restore | Workspaces, layouts, column order, widths, stacks and pins survive a restart. Windows are matched by ID, then by app and title. |
+| Settings window | Menu bar → Settings… (⌘,) or `stripline settings`. Every option has a control: layout, gaps with a live preview, the focus border with a live preview, trackpad and mouse, a shortcut recorder with conflict warnings, window rules, displays, and the checks from `stripline doctor`. Changes apply as you make them. |
 | Live config | TOML file, reloaded automatically when you save it. Shortcuts follow your keyboard layout (QWERTZ, AZERTY, Dvorak, ...). |
 | Automation | `stripline msg <action>` over a Unix socket, plus a JSON `state` dump. |
-| Menu bar item | Pause or resume, reload config, re-tile, open config, quit. The top line shows when the config was last loaded, or why it failed (hover for the full error). |
+| Menu bar item | Settings, pause or resume, reload config, re-tile, open config file, quit. The top line shows when the config was last loaded, or why it failed (hover for the full error). |
 | Launch at login | `stripline service install` sets up a LaunchAgent that also restarts Stripline if it crashes. |
 | `stripline doctor` | Checks permissions, conflicting apps, Stage Manager, Spaces settings and trackpad gesture clashes. |
 
@@ -132,7 +133,12 @@ add entries to the `[bindings]` table of the config file.
 
 ## Configuration
 
-`~/.config/stripline/config.toml`. Run `stripline init-config` to write a
+The easiest way is the settings window: **Settings…** in the menu bar menu
+(⌘,), or `stripline settings`. It writes only the values you change to the
+config file below and applies them immediately. The first time it saves, it
+keeps your hand-written file as `config.toml.bak`.
+
+The file itself is `~/.config/stripline/config.toml`. Run `stripline init-config` to write a
 commented copy of [`config.example.toml`](config.example.toml). Every key is
 optional. The file is re-read within two seconds of being saved, and
 `stripline check-config` validates it.
@@ -197,6 +203,11 @@ Raycast, Alfred, skhd, BetterTouchTool or shell scripts.
    keymap.rs      character -> key code for the active keyboard layout
    border.rs      focus border overlay (one Core Animation layer)
    sink.rs        invisible window that takes focus on an empty workspace
+   settings_window.rs  native window hosting the settings page (WebKit)
+ src/settings/     settings back end, runs on any OS
+   mod.rs         HTTP server on 127.0.0.1 (random port, per-run token) + JSON API
+   model.rs       shortcut catalogue, binding overrides, minimal TOML writer
+   ui.html        the settings page (no dependencies; light and dark)
    menu.rs        menu bar item
  src/config.rs, keys.rs, action.rs, ipc.rs, service.rs
 ```
@@ -222,7 +233,6 @@ Raycast, Alfred, skhd, BetterTouchTool or shell scripts.
 
 Compared with commercial scrolling window managers, these are missing:
 
-- a settings window (configuration is the TOML file)
 - on-screen overlays other than the focus border: strip indicator, dimming
   of inactive windows, clickable tab bars
 - treating a native macOS tab group as one column (each tab is managed as its
@@ -235,6 +245,7 @@ layout behaviour can be developed and tested on any OS:
 ```sh
 cargo test                                      # runs anywhere
 cargo clippy --target aarch64-apple-darwin      # type-checks the macOS layer from Linux too
+cargo run -- settings --standalone              # the settings page in your browser, on any OS
 ```
 
 ## License

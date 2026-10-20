@@ -26,6 +26,9 @@ thread_local! {
     static PAUSED: Cell<bool> = const { Cell::new(false) };
     static TRACK_MOUSE_MOVES: Cell<bool> = const { Cell::new(false) };
     static LAST_MOVE: Cell<Option<Instant>> = const { Cell::new(None) };
+    /// While set (and not expired), every key reaches the app: the settings
+    /// window is recording a new shortcut.
+    static RECORDING_UNTIL: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 
 static KEY_TAP: AtomicPtr<c_void> = AtomicPtr::new(ptr::null_mut());
@@ -33,6 +36,16 @@ static MOUSE_TAP: AtomicPtr<c_void> = AtomicPtr::new(ptr::null_mut());
 
 pub fn set_bindings(map: HashMap<(u16, Mods), Action>) {
     BINDINGS.with(|b| *b.borrow_mut() = map);
+}
+
+/// Let all keys through while a shortcut is being recorded. Expires on its
+/// own after 15 seconds in case the settings window never says it is done.
+pub fn set_recording(on: bool) {
+    RECORDING_UNTIL.with(|r| r.set(on.then(|| Instant::now() + Duration::from_secs(15))));
+}
+
+fn recording() -> bool {
+    RECORDING_UNTIL.with(|r| r.get().is_some_and(|t| Instant::now() < t))
 }
 
 pub fn set_paused(paused: bool) {
@@ -61,6 +74,9 @@ unsafe extern "C" fn key_callback(
         return event;
     }
     if ty != EV_KEY_DOWN {
+        return event;
+    }
+    if recording() {
         return event;
     }
     let code = CGEventGetIntegerValueField(event, FIELD_KEYCODE) as u16;

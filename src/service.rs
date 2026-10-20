@@ -95,6 +95,33 @@ pub fn install() -> Result<String, String> {
     ))
 }
 
+/// Whether Stripline is set to start at login.
+pub fn installed() -> bool {
+    plist_path().exists()
+}
+
+/// Turn starting at login on or off without touching the running instance
+/// (unlike `install`/`uninstall`, which also start or stop it right away).
+pub fn set_login_item(on: bool) -> Result<String, String> {
+    let path = plist_path();
+    if on {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe = exe.canonicalize().unwrap_or(exe);
+        std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+        if let Some(dir) = log_path().parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        std::fs::write(&path, plist(&exe, &log_path())).map_err(|e| e.to_string())?;
+        Ok("Stripline will open at login".into())
+    } else {
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok("Stripline won't open at login".into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("Stripline won't open at login".into()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+}
+
 pub fn uninstall() -> Result<String, String> {
     let path = plist_path();
     let _ = launchctl(&["bootout", &format!("gui/{}/{LABEL}", uid())]);

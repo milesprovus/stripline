@@ -49,6 +49,13 @@ define_class!(
             let _ = std::process::Command::new("open").arg("-t").arg(&path).spawn();
         }
 
+        #[unsafe(method(openSettings:))]
+        fn open_settings(&self, _sender: Option<&AnyObject>) {
+            if let Err(e) = super::settings_window::open(self.mtm()) {
+                log::error!("settings: {e}");
+            }
+        }
+
         #[unsafe(method(quit:))]
         fn quit(&self, _sender: Option<&AnyObject>) {
             wm::run_action(Action::Quit);
@@ -124,10 +131,13 @@ pub fn install(mtm: MainThreadMarker) {
     status.setTitle(ns_string!("Config not loaded yet"));
     menu.addItem(&status);
     menu.addItem(&NSMenuItem::separatorItem(mtm));
+    let settings = add(&menu, &target, "Settings…", sel!(openSettings:), mtm);
+    settings.setKeyEquivalent(ns_string!(","));
+    menu.addItem(&NSMenuItem::separatorItem(mtm));
     let toggle = add(&menu, &target, "Pause Tiling", sel!(toggleTiling:), mtm);
     add(&menu, &target, "Reload Config", sel!(reloadConfig:), mtm);
     add(&menu, &target, "Re-tile All Windows", sel!(retile:), mtm);
-    add(&menu, &target, "Open Config…", sel!(openConfig:), mtm);
+    add(&menu, &target, "Open Config File…", sel!(openConfig:), mtm);
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     add(&menu, &target, "Quit Stripline", sel!(quit:), mtm);
     item.setMenu(Some(&menu));

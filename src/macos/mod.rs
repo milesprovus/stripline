@@ -10,6 +10,7 @@ mod ffi;
 mod keymap;
 mod menu;
 mod observer;
+mod settings_window;
 mod sink;
 mod wm;
 

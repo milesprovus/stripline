@@ -43,6 +43,12 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <string>12.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <!-- The settings window loads its page from 127.0.0.1. -->
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <key>NSHumanReadableCopyright</key>
     <string>MIT License</string>
 </dict>

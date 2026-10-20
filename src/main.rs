@@ -9,6 +9,11 @@ mod engine;
 mod ipc;
 mod keys;
 mod service;
+mod settings;
+
+/// Tests that change environment variables hold this lock.
+#[cfg(test)]
+pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -28,6 +33,7 @@ USAGE:
     stripline bindings            show the active key bindings
     stripline init-config         write a commented config file
     stripline check-config        validate the config file
+    stripline settings            open the settings window
     stripline doctor              check macOS settings that affect Stripline
     stripline service install    start at login (LaunchAgent)
     stripline service uninstall  stop starting at login
@@ -58,6 +64,9 @@ fn main() -> ExitCode {
             }
         }),
         Some("doctor") => doctor(),
+        Some("settings") => {
+            open_settings(args.iter().any(|a| a == "--no-open"), args.iter().any(|a| a == "--standalone"))
+        }
         Some("service") => match arg(1) {
             Some("install") => service::install(),
             Some("uninstall") => service::uninstall(),
@@ -90,6 +99,26 @@ fn show_bindings() -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
+/// Open the settings window in the running instance, or serve the settings
+/// page from this process and open it in a browser.
+fn open_settings(no_open: bool, standalone: bool) -> Result<String, String> {
+    if !standalone && ipc::send("ping").is_ok() {
+        return ipc::send("settings").map(|_| String::new());
+    }
+    let url = settings::start()?;
+    println!("Settings: {url}");
+    if !no_open {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let _ = std::process::Command::new(opener).arg(&url).spawn();
+    }
+    println!("Serving settings until you press Ctrl-C.");
+    use std::io::Write as _;
+    let _ = std::io::stdout().flush();
+    loop {
+        std::thread::park();
+    }
+}
+
 fn init_config() -> Result<String, String> {
     let path = config::config_path();
     if path.exists() {
@@ -102,6 +131,11 @@ fn init_config() -> Result<String, String> {
 
 #[cfg(target_os = "macos")]
 fn run() -> Result<String, String> {
+    // A second copy (e.g. launchd starting the login item while one already
+    // runs) exits cleanly, so launchd does not keep restarting it.
+    if ipc::send("ping").is_ok() {
+        return Ok("stripline is already running".into());
+    }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp_millis()
         .init();
@@ -115,7 +149,7 @@ fn run() -> Result<String, String> {
 
 #[cfg(target_os = "macos")]
 fn doctor() -> Result<String, String> {
-    Ok(macos::doctor::report())
+    Ok(macos::doctor::report(true))
 }
 
 #[cfg(not(target_os = "macos"))]

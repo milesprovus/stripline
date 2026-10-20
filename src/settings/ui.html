@@ -1,0 +1,1001 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stripline Settings</title>
+<style>
+:root {
+  --bg: #f2f2f4;
+  --sidebar: #e7e7ea;
+  --card: #ffffff;
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --hair: rgba(0, 0, 0, 0.09);
+  --accent: #0a7cff;
+  --accent-text: #ffffff;
+  --field: #ffffff;
+  --field-border: rgba(0, 0, 0, 0.16);
+  --chip: #f0f0f3;
+  --danger: #d70015;
+  --warn: #b25000;
+  --ok: #1e8e3e;
+  --shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.12);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1f;
+    --sidebar: #252527;
+    --card: #2c2c2e;
+    --text: #f5f5f7;
+    --muted: #98989d;
+    --hair: rgba(255, 255, 255, 0.09);
+    --accent: #0a84ff;
+    --field: #1c1c1e;
+    --field-border: rgba(255, 255, 255, 0.16);
+    --chip: #3a3a3c;
+    --danger: #ff453a;
+    --warn: #ff9f0a;
+    --ok: #30d158;
+    --shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  display: flex;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+input, select, textarea, button { font: inherit; color: inherit; }
+input[type=text], input[type=number], input[type=search], select {
+  user-select: text; -webkit-user-select: text;
+  background: var(--field); border: 1px solid var(--field-border); border-radius: 6px;
+  padding: 4px 8px; min-height: 24px; outline: none;
+}
+input[type=text]:focus, input[type=number]:focus, input[type=search]:focus, select:focus {
+  border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+input.invalid, input.invalid:focus { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent); }
+input[type=range]:disabled { opacity: 0.35; }
+
+/* ---- sidebar ---- */
+aside {
+  width: 214px; flex: none; background: var(--sidebar); padding: 18px 10px;
+  border-right: 1px solid var(--hair); display: flex; flex-direction: column; gap: 2px; overflow-y: auto;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 2px 8px 16px; }
+.brand-icon {
+  width: 30px; height: 30px; border-radius: 8px; flex: none;
+  background: linear-gradient(135deg, #3d8bff, #6e5bff); display: grid; place-items: center;
+}
+.brand-name { font-weight: 600; font-size: 14px; }
+.brand-version { color: var(--muted); font-size: 11px; }
+nav button {
+  all: unset; display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 6px;
+  cursor: default; width: 100%; box-sizing: border-box; font-size: 13px;
+}
+nav button:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+nav button.active { background: var(--accent); color: var(--accent-text); }
+nav button.active svg { color: var(--accent-text); }
+.ico { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; flex: none; color: #fff; }
+.ico svg { width: 14px; height: 14px; }
+.sidebar-foot { margin-top: auto; padding: 10px 8px 0; color: var(--muted); font-size: 11px; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+
+/* ---- main ---- */
+main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+header {
+  display: flex; align-items: center; gap: 12px; padding: 14px 24px; border-bottom: 1px solid var(--hair);
+  background: var(--bg); position: sticky; top: 0; z-index: 2;
+}
+header h1 { font-size: 17px; font-weight: 600; margin: 0; flex: 1; }
+.status { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; max-width: 55%; }
+.status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status.error { color: var(--danger); }
+.status.saved { color: var(--muted); }
+.content { flex: 1; overflow-y: auto; padding: 18px 24px 40px; }
+.pane { display: none; max-width: 760px; margin: 0 auto; }
+.pane.active { display: block; }
+.banner {
+  border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 12.5px;
+  background: color-mix(in srgb, var(--warn) 14%, var(--card)); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+}
+.banner.info { background: color-mix(in srgb, var(--accent) 10%, var(--card)); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.banner code { font-size: 11.5px; }
+
+h2 { font-size: 13px; font-weight: 600; margin: 22px 4px 7px; }
+h2:first-child { margin-top: 0; }
+.h2-note { font-weight: 400; color: var(--muted); margin-left: 6px; }
+.card { background: var(--card); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+.row {
+  display: flex; align-items: center; gap: 16px; padding: 10px 14px; min-height: 44px;
+  border-top: 1px solid var(--hair);
+}
+.row:first-child { border-top: none; }
+.row.disabled { opacity: 0.45; pointer-events: none; }
+.label { flex: 1; min-width: 0; }
+.label .title { font-size: 13px; }
+.label .desc { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+.control { flex: none; display: flex; align-items: center; gap: 8px; }
+.note { color: var(--muted); font-size: 11.5px; margin: 6px 4px 0; }
+
+/* toggle */
+.switch { position: relative; width: 38px; height: 22px; flex: none; }
+.switch input { opacity: 0; width: 100%; height: 100%; margin: 0; position: absolute; }
+.switch span {
+  position: absolute; inset: 0; border-radius: 11px; background: color-mix(in srgb, var(--text) 18%, transparent);
+  transition: background 0.15s; pointer-events: none;
+}
+.switch span::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.15s;
+}
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(16px); }
+.switch input:focus-visible + span { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+
+/* segmented */
+.seg { display: inline-flex; background: color-mix(in srgb, var(--text) 8%, transparent); border-radius: 7px; padding: 2px; }
+.seg button {
+  all: unset; padding: 3px 11px; border-radius: 5px; font-size: 12px; cursor: default; white-space: nowrap;
+}
+.seg button.on { background: var(--card); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18); font-weight: 500; }
+.seg button:focus-visible { outline: 2px solid var(--accent); }
+
+/* slider */
+.slider { display: flex; align-items: center; gap: 10px; }
+.slider input[type=range] { width: 190px; accent-color: var(--accent); }
+.slider output { min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+
+button.btn {
+  all: unset; padding: 4px 12px; border-radius: 6px; background: var(--card); border: 1px solid var(--field-border);
+  font-size: 12.5px; cursor: default; white-space: nowrap; box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.08);
+}
+button.btn:hover { background: color-mix(in srgb, var(--text) 5%, var(--card)); }
+button.btn:active { background: color-mix(in srgb, var(--text) 10%, var(--card)); }
+button.btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+button.btn.danger { color: var(--danger); }
+button.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.icon {
+  all: unset; width: 22px; height: 22px; border-radius: 5px; display: grid; place-items: center; color: var(--muted); cursor: default;
+}
+button.icon:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+button.icon:disabled { opacity: 0.3; }
+button.icon svg { width: 13px; height: 13px; }
+
+/* chips */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; background: var(--chip); border-radius: 6px;
+  padding: 2px 4px 2px 8px; font-size: 12.5px; border: 1px solid var(--hair);
+}
+.chip.warn { border-color: color-mix(in srgb, var(--warn) 60%, transparent); }
+.chip kbd { font: 500 12.5px -apple-system, system-ui, sans-serif; letter-spacing: 0.5px; }
+.chip button { all: unset; width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; color: var(--muted); }
+.chip button:hover { background: color-mix(in srgb, var(--text) 12%, transparent); color: var(--text); }
+.chip .w { color: var(--warn); font-size: 11px; }
+.add-key {
+  all: unset; font-size: 12px; color: var(--accent); padding: 2px 6px; border-radius: 5px; cursor: default; white-space: nowrap;
+}
+.add-key:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.tag {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted);
+  border: 1px solid var(--hair); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px;
+}
+
+/* previews */
+.preview {
+  height: 190px; border-radius: 10px; position: relative; overflow: hidden; margin-bottom: 4px;
+  background: linear-gradient(135deg, #5b8def 0%, #8a63d2 55%, #d76d77 100%);
+}
+@media (prefers-color-scheme: dark) { .preview { background: linear-gradient(135deg, #1f3b73 0%, #3d2a6b 55%, #6b2f3a 100%); } }
+.mock {
+  position: absolute; background: var(--card); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  display: flex; flex-direction: column;
+}
+.mock .bar { height: 22px; display: flex; gap: 6px; align-items: center; padding: 0 9px; border-bottom: 1px solid var(--hair); flex: none; }
+.mock .bar i { width: 9px; height: 9px; border-radius: 50%; background: #c7c7cc; display: block; }
+.mock .lines { padding: 10px 12px; display: grid; gap: 7px; }
+.mock .lines b { display: block; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text) 10%, transparent); }
+.ring { position: absolute; pointer-events: none; }
+.gap-preview { height: 150px; background: color-mix(in srgb, var(--text) 9%, var(--bg)); border-radius: 10px; position: relative; margin: 2px 0 8px; }
+.gap-preview div {
+  position: absolute; border-radius: 5px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  background: color-mix(in srgb, var(--text) 16%, var(--card)); border: 1px solid var(--hair);
+}
+.gap-preview div.focused { outline: 2px solid var(--accent); outline-offset: 0; }
+
+.swatches { display: flex; gap: 6px; }
+.swatches button { all: unset; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--hair); cursor: default; }
+.swatches button:hover { transform: scale(1.12); }
+input[type=color] { width: 36px; height: 24px; padding: 0; border: 1px solid var(--field-border); border-radius: 6px; background: none; }
+
+.toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.toolbar input[type=search] { flex: 1; }
+
+.rule { padding: 12px 14px; border-top: 1px solid var(--hair); display: grid; gap: 9px; }
+.rule:first-child { border-top: none; }
+.rule-head { display: flex; align-items: center; gap: 8px; }
+.rule-head .n { color: var(--muted); font-size: 11px; width: 18px; }
+.rule-grid { display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; align-items: center; }
+.rule-grid > label { color: var(--muted); font-size: 12px; text-align: right; }
+.rule-grid input[type=text] { width: 100%; }
+.empty { padding: 26px; text-align: center; color: var(--muted); }
+
+pre.report {
+  user-select: text; -webkit-user-select: text; margin: 0; padding: 12px 14px; font: 11.5px/1.55 ui-monospace, Menlo, monospace;
+  white-space: pre-wrap; background: var(--card);
+}
+code { font: 11.5px ui-monospace, Menlo, monospace; user-select: text; -webkit-user-select: text; }
+
+/* recorder */
+.overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.32); display: none; place-items: center; z-index: 10;
+}
+.overlay.open { display: grid; }
+.dialog {
+  width: 360px; background: var(--card); border-radius: 12px; padding: 20px; text-align: center;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+.dialog h3 { margin: 0 0 4px; font-size: 14px; }
+.dialog .sub { color: var(--muted); font-size: 12px; }
+.dialog .keys {
+  margin: 16px 0; min-height: 44px; display: grid; place-items: center; font-size: 22px; font-weight: 500;
+  border: 1px dashed var(--field-border); border-radius: 8px; letter-spacing: 1px;
+}
+.dialog .msg { min-height: 18px; font-size: 12px; margin-bottom: 12px; }
+.dialog .msg.warn { color: var(--warn); }
+.dialog .actions { display: flex; gap: 8px; justify-content: center; }
+
+@media (max-width: 760px) {
+  aside { width: 64px; padding: 14px 8px; }
+  .brand-name, .brand-version, nav button .txt, .sidebar-foot { display: none; }
+  nav button { justify-content: center; }
+  .slider input[type=range] { width: 120px; }
+  .row { flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+<aside>
+  <div class="brand">
+    <div class="brand-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="#fff"><rect x="1" y="3" width="4" height="10" rx="1"/><rect x="6" y="3" width="4" height="10" rx="1" opacity=".8"/><rect x="11" y="3" width="4" height="10" rx="1" opacity=".55"/></svg></div>
+    <div><div class="brand-name">Stripline</div><div class="brand-version" id="version"></div></div>
+  </div>
+  <nav id="nav"></nav>
+  <div class="sidebar-foot" id="foot"></div>
+</aside>
+<main>
+  <header>
+    <h1 id="title">General</h1>
+    <div class="status" id="status"><span></span></div>
+  </header>
+  <div class="content" id="content">
+    <div id="banners"></div>
+    <section class="pane" id="pane-general"></section>
+    <section class="pane" id="pane-layout"></section>
+    <section class="pane" id="pane-border"></section>
+    <section class="pane" id="pane-input"></section>
+    <section class="pane" id="pane-shortcuts"></section>
+    <section class="pane" id="pane-rules"></section>
+    <section class="pane" id="pane-displays"></section>
+    <section class="pane" id="pane-advanced"></section>
+  </div>
+</main>
+
+<div class="overlay" id="recorder" role="dialog" aria-modal="true" aria-labelledby="rec-title">
+  <div class="dialog">
+    <h3 id="rec-title">New shortcut</h3>
+    <div class="sub" id="rec-sub"></div>
+    <div class="keys" id="rec-keys">Press keys…</div>
+    <div class="msg" id="rec-msg">Hold modifier keys (⌃ ⌥ ⇧ ⌘) and press a key. Esc cancels.</div>
+    <div class="actions" id="rec-actions"><button class="btn" id="rec-cancel">Cancel</button></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const token = new URLSearchParams(location.search).get("token") || "";
+let S = null;          // state from the server
+let cfg = null;        // working copy of the config
+let binds = [];        // wanted bindings: [[combo, action], ...]
+let initial = null;    // snapshot taken when the window opened, for Revert
+let current = "general";
+
+const PANES = [
+  { id: "general", label: "General", color: "#8e8e93", icon: '<circle cx="8" cy="8" r="2.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>' },
+  { id: "layout", label: "Gaps & Sizes", color: "#34c759", icon: '<rect x="1.5" y="2.5" width="5.5" height="11" rx="1.2"/><rect x="9" y="2.5" width="5.5" height="5" rx="1.2"/><rect x="9" y="8.5" width="5.5" height="5" rx="1.2"/>' },
+  { id: "border", label: "Focus Border", color: "#0a84ff", icon: '<rect x="2" y="2.5" width="12" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/>' },
+  { id: "input", label: "Trackpad & Mouse", color: "#ff9500", icon: '<rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5 8h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' },
+  { id: "shortcuts", label: "Shortcuts", color: "#5e5ce6", icon: '<rect x="1.5" y="4" width="13" height="8.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 7h1M7 7h1M10 7h2M4.5 10h7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>' },
+  { id: "rules", label: "Window Rules", color: "#ff2d55", icon: '<path d="M3 4h10M3 8h10M3 12h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' },
+  { id: "displays", label: "Displays", color: "#30b0c7", icon: '<rect x="1.5" y="2.5" width="13" height="8.5" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6 14h4M8 11v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' },
+  { id: "advanced", label: "Advanced", color: "#636366", icon: '<path d="M3 4.5h10M3 8h10M3 11.5h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="6" cy="4.5" r="1.6"/><circle cx="10.5" cy="8" r="1.6"/><circle cx="5" cy="11.5" r="1.6"/>' },
+];
+
+// ---------- helpers ----------
+const $ = (sel, root = document) => root.querySelector(sel);
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k === "html") e.innerHTML = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k in e && typeof v !== "string") e[k] = v;
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(k));
+  return e;
+}
+const svg = (inner, size = 13) => {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 16 16"); s.setAttribute("width", size); s.setAttribute("height", size);
+  s.setAttribute("fill", "currentColor"); s.innerHTML = inner; return s;
+};
+const ICON_X = '<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>';
+const ICON_UP = '<path d="M4 10l4-4 4 4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>';
+const ICON_DOWN = '<path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>';
+const ICON_TRASH = '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/>';
+
+const get = (path) => path.split(".").reduce((o, k) => (o == null ? o : o[k]), cfg);
+function set(path, value) {
+  const keys = path.split(".");
+  const last = keys.pop();
+  keys.reduce((o, k) => o[k], cfg)[last] = value;
+  changed();
+}
+const clone = (x) => JSON.parse(JSON.stringify(x));
+const pct = (v) => Math.round(v * 100) + "%";
+
+async function api(method, path, body) {
+  const r = await fetch(path, {
+    method,
+    headers: { "X-Stripline-Token": token, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let j;
+  try { j = await r.json(); } catch { throw new Error("unexpected response (" + r.status + ")"); }
+  if (!r.ok || j.ok === false) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+// ---------- saving ----------
+let saveTimer = null, saving = false, again = false;
+function setStatus(kind, text) {
+  const s = $("#status");
+  s.className = "status " + kind;
+  s.innerHTML = "";
+  const dot = el("i", { class: "dot", style: `background:${kind === "error" ? "var(--danger)" : kind === "saved" ? "var(--ok)" : "var(--muted)"}` });
+  s.append(dot, el("span", { title: text || "" }, text || ""));
+}
+function changed() {
+  setStatus("pending", "Saving…");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 400);
+  refreshLive();
+}
+function payload() {
+  const c = clone(cfg);
+  // Rules still being typed (no app and no title) are not saved yet.
+  c.rules = c.rules.filter((r) => (r.app && r.app.trim()) || (r.title && r.title.trim()));
+  for (const r of c.rules) {
+    if (r.app !== null && !r.app.trim()) r.app = null;
+    if (r.title !== null && !r.title.trim()) r.title = null;
+  }
+  return { config: c, bindings: binds };
+}
+async function save() {
+  if (saving) { again = true; return; }
+  saving = true;
+  setStatus("pending", "Saving…");
+  try {
+    const r = await api("POST", "/api/save", payload());
+    binds = r.bindings;
+    setStatus("saved", S.running ? "Saved and applied" : "Saved");
+    if (current === "shortcuts") renderShortcuts();
+  } catch (e) {
+    setStatus("error", "Not saved: " + e.message);
+  } finally {
+    saving = false;
+    if (again) { again = false; save(); }
+  }
+}
+
+// ---------- controls ----------
+function row(title, desc, control, opts = {}) {
+  return el("div", { class: "row" + (opts.disabled ? " disabled" : ""), "data-dep": opts.dep || null },
+    el("div", { class: "label" }, el("div", { class: "title" }, title), desc ? el("div", { class: "desc" }, desc) : null),
+    el("div", { class: "control" }, control));
+}
+function toggle(path, onChange) {
+  const input = el("input", { type: "checkbox", checked: !!get(path), "aria-label": path });
+  input.addEventListener("change", () => { set(path, input.checked); onChange && onChange(input.checked); syncDeps(); });
+  return el("label", { class: "switch" }, input, el("span"));
+}
+function seg(path, options, onChange) {
+  const wrap = el("div", { class: "seg", role: "radiogroup" });
+  const draw = () => {
+    wrap.innerHTML = "";
+    for (const [value, label] of options) {
+      const on = JSON.stringify(get(path)) === JSON.stringify(value);
+      wrap.append(el("button", {
+        class: on ? "on" : "", role: "radio", "aria-checked": on ? "true" : "false",
+        onclick: () => { set(path, value); draw(); onChange && onChange(value); syncDeps(); },
+      }, label));
+    }
+  };
+  draw();
+  return wrap;
+}
+function slider(path, { min, max, step = 1, fmt = (v) => v, scale = 1, onInput } = {}) {
+  const out = el("output");
+  const input = el("input", { type: "range", min, max, step, "aria-label": path });
+  const show = () => { input.value = get(path) * scale; out.textContent = fmt(get(path)); };
+  input.addEventListener("input", () => {
+    const v = Math.round((parseFloat(input.value) / scale) * 10000) / 10000;
+    set(path, v); out.textContent = fmt(v); onInput && onInput(v);
+  });
+  show();
+  return el("div", { class: "slider" }, input, out);
+}
+function card(...rows) { return el("div", { class: "card" }, ...rows); }
+function syncDeps() {
+  document.querySelectorAll("[data-dep]").forEach((r) => {
+    const dep = r.getAttribute("data-dep");
+    const on = dep.startsWith("!") ? !get(dep.slice(1)) : !!get(dep);
+    r.classList.toggle("disabled", !on);
+  });
+}
+
+// ---------- key names ----------
+const MOD_ORDER = ["ctrl", "alt", "shift", "cmd"];
+const MOD_SYM = { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘" };
+const KEY_SYM = {
+  left: "←", right: "→", up: "↑", down: "↓", return: "↩", enter: "↩", tab: "⇥", space: "Space",
+  escape: "⎋", esc: "⎋", delete: "⌫", backspace: "⌫", forwarddelete: "⌦", home: "↖", end: "↘",
+  pageup: "⇞", pagedown: "⇟",
+};
+function prettyCombo(combo) {
+  const parts = combo.split("+");
+  let key = parts.pop();
+  if (key === "" && combo.endsWith("+")) key = "+";
+  const mods = parts.map((m) => MOD_SYM[m] || m).join("");
+  let k = KEY_SYM[key] || (/^f\d+$/.test(key) ? key.toUpperCase() : key.length === 1 ? key.toUpperCase() : key);
+  return mods + k;
+}
+const NAMED_CODES = {
+  ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", Enter: "return", NumpadEnter: "return",
+  Tab: "tab", Space: "space", Escape: "escape", Backspace: "delete", Delete: "forwarddelete",
+  Home: "home", End: "end", PageUp: "pageup", PageDown: "pagedown",
+};
+function keyName(code) {
+  if (NAMED_CODES[code]) return NAMED_CODES[code];
+  if (/^F([1-9]|1\d|20)$/.test(code)) return code.toLowerCase();
+  if (S.keys[code]) return S.keys[code].toLowerCase();
+  return null;
+}
+function comboWarning(combo) {
+  const shots = ["shift+cmd+3", "shift+cmd+4", "shift+cmd+5"];
+  if (shots.includes(combo)) return "Also a macOS screenshot shortcut";
+  const system = { "cmd+tab": "app switcher", "cmd+space": "Spotlight", "ctrl+space": "input source switching",
+    "cmd+q": "quitting apps", "cmd+w": "closing windows", "cmd+h": "hiding apps", "cmd+m": "minimising" };
+  if (system[combo]) return "macOS uses this for " + system[combo];
+  if (!/(ctrl|alt|cmd)\+/.test(combo) && !/^(shift\+)?f\d+$/.test(combo)) return "No ⌃/⌥/⌘: this key will stop typing in apps";
+  return null;
+}
+
+// ---------- panes ----------
+function renderGeneral() {
+  const p = $("#pane-general"); p.innerHTML = "";
+  p.append(
+    el("h2", {}, "Layout"),
+    card(
+      row("Default layout", "Used by every workspace until you switch it with the Switch layout shortcut.",
+        seg("layout.default_mode", [["split", "Split"], ["scroll", "Scroll"]], () => renderGeneral())),
+      el("div", { class: "row" }, el("div", { class: "label" }, el("div", { class: "desc" },
+        get("layout.default_mode") === "split"
+          ? "Split: windows share the screen. A new window splits the focused one in half, side by side or stacked depending on its shape."
+          : "Scroll: each window is a column on a strip wider than the screen. New windows open beside the focused one and nothing gets smaller."))),
+    ),
+    el("h2", {}, "Animation"),
+    card(
+      row("Animate scrolling", "Spring animation when the strip moves.", toggle("animation.enabled")),
+      row("Speed", "Higher settles faster.", slider("animation.speed", { min: 8, max: 40, step: 1, fmt: (v) => (v <= 14 ? "Gentle" : v >= 30 ? "Snappy" : "Normal") + " · " + v }), { dep: "animation.enabled" }),
+    ),
+    el("h2", {}, "Startup"),
+    card(row("Open Stripline at login", S.login_item ? "Starts automatically and restarts if it ever crashes." : "Starts automatically and restarts if it ever crashes.",
+      loginToggle())),
+    el("h2", {}, "Status"),
+    card(
+      row("Window manager", S.running ? "Running. Changes apply as soon as they are saved." : "Not running. Changes are saved and used when Stripline starts.",
+        el("span", {}, el("i", { class: "dot", style: `background:${S.running ? "var(--ok)" : "var(--muted)"}` }), S.running ? "Running" : "Stopped")),
+      row("Config file", S.path, el("button", { class: "btn", onclick: openConfig }, "Open in Editor")),
+    ),
+  );
+  syncDeps();
+}
+function loginToggle() {
+  const input = el("input", { type: "checkbox", checked: !!S.login_item, "aria-label": "login item" });
+  input.addEventListener("change", async () => {
+    try {
+      const r = await api("POST", "/api/login-item", { on: input.checked });
+      S.login_item = r.login_item; setStatus("saved", r.message);
+    } catch (e) { input.checked = !input.checked; setStatus("error", e.message); }
+  });
+  return el("label", { class: "switch" }, input, el("span"));
+}
+async function openConfig() {
+  try { await api("POST", "/api/open-config", {}); } catch (e) { setStatus("error", e.message); }
+}
+
+function outerSame() { return typeof cfg.layout.outer_gap === "number"; }
+function renderLayout() {
+  const p = $("#pane-layout"); p.innerHTML = "";
+  const og = cfg.layout.outer_gap;
+  const outerRows = outerSame()
+    ? [row("Screen edges", "Space between windows and the edges of the screen.", slider("layout.outer_gap", { min: 0, max: 60, fmt: (v) => v + " pt" }))]
+    : ["top", "right", "bottom", "left"].map((side) =>
+      row("Edge: " + side, null, slider("layout.outer_gap." + side, { min: 0, max: 60, fmt: (v) => v + " pt" })));
+  const sameToggle = el("input", { type: "checkbox", checked: outerSame(), "aria-label": "same on all sides" });
+  sameToggle.addEventListener("change", () => {
+    const g = cfg.layout.outer_gap;
+    cfg.layout.outer_gap = sameToggle.checked
+      ? (typeof g === "number" ? g : Math.round((g.top + g.right + g.bottom + g.left) / 4))
+      : { top: g, right: g, bottom: g, left: g };
+    changed(); renderLayout();
+  });
+  p.append(
+    el("h2", {}, "Gaps"),
+    el("div", { class: "gap-preview", id: "gap-preview" }),
+    card(
+      row("Between windows", null, slider("layout.gap", { min: 0, max: 40, fmt: (v) => v + " pt", onInput: drawGapPreview })),
+      row("Same gap on every edge", null, el("label", { class: "switch" }, sameToggle, el("span"))),
+      ...outerRows,
+    ),
+    el("h2", {}, "Resizing", el("span", { class: "h2-note" }, "both layouts")),
+    card(
+      row("Wider / narrower step", "How much one press of the shortcut changes the width.", slider("layout.width_step", { min: 0.02, max: 0.5, step: 0.01, fmt: pct })),
+      row("Taller / shorter step", null, slider("layout.height_step", { min: 0.02, max: 0.5, step: 0.01, fmt: pct })),
+    ),
+    el("h2", {}, "Scrolling layout"),
+    card(
+      row("New column width", "Fraction of the screen.", slider("layout.default_width", { min: 0.1, max: 1, step: 0.01, fmt: pct })),
+      row("Width presets", "Visited by Cycle width presets.", presetsEditor()),
+      row("Keep the focused column centred", null, seg("layout.center", [["never", "Never"], ["on-overflow", "When it overflows"], ["always", "Always"]])),
+      row("New windows open", null, seg("layout.open_at", [["next", "Next to focused"], ["start", "At the start"], ["end", "At the end"]])),
+    ),
+  );
+  drawGapPreview();
+}
+function presetsEditor() {
+  const wrap = el("div", { class: "chips" });
+  const draw = () => {
+    wrap.innerHTML = "";
+    const list = [...cfg.layout.width_presets].sort((a, b) => a - b);
+    for (const v of list) {
+      wrap.append(el("span", { class: "chip" }, pct(v), el("button", {
+        title: "Remove", "aria-label": "remove " + pct(v),
+        onclick: () => {
+          if (cfg.layout.width_presets.length <= 1) return;
+          cfg.layout.width_presets = cfg.layout.width_presets.filter((x) => x !== v); changed(); draw();
+        },
+      }, svg(ICON_X, 10))));
+    }
+    const input = el("input", { type: "number", min: 5, max: 100, placeholder: "%", style: "width:58px", "aria-label": "new preset percent" });
+    const add = () => {
+      const n = parseFloat(input.value);
+      if (!(n > 0 && n <= 100)) { input.classList.add("invalid"); return; }
+      const f = Math.round(n * 10) / 1000;
+      if (!cfg.layout.width_presets.some((x) => Math.abs(x - f) < 0.001)) { cfg.layout.width_presets.push(f); changed(); }
+      draw();
+    };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
+    wrap.append(input, el("button", { class: "btn", onclick: add }, "Add"));
+  };
+  draw();
+  return wrap;
+}
+function drawGapPreview() {
+  const box = $("#gap-preview"); if (!box) return;
+  box.innerHTML = "";
+  const W = box.clientWidth || 600, H = box.clientHeight || 150, k = 0.5;
+  const g = cfg.layout.gap * k;
+  const og = cfg.layout.outer_gap;
+  const o = typeof og === "number" ? { top: og, right: og, bottom: og, left: og } : og;
+  const x0 = o.left * k, y0 = o.top * k, w = W - (o.left + o.right) * k, h = H - (o.top + o.bottom) * k;
+  const half = (w - g) / 2;
+  const tiles = [[x0, y0, half, h, true], [x0 + half + g, y0, half, (h - g) / 2], [x0 + half + g, y0 + (h - g) / 2 + g, half, (h - g) / 2]];
+  for (const [x, y, tw, th, f] of tiles) {
+    box.append(el("div", { class: f ? "focused" : "", style: `left:${x}px;top:${y}px;width:${Math.max(tw, 2)}px;height:${Math.max(th, 2)}px` }));
+  }
+}
+
+const SWATCHES = [["#3D8BFF", "Blue"], ["#A970FF", "Purple"], ["#FF5FA2", "Pink"], ["#FF9F0A", "Orange"], ["#30D158", "Green"], ["#FFFFFF66", "Subtle white"], ["#8E8E93", "Graphite"]];
+function parseColor(c) {
+  let h = (c || "").trim().replace(/^#/, "");
+  if (h.length === 3) h = h.split("").map((x) => x + x).join("");
+  if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(h)) return { hex: "#3d8bff", alpha: 1 };
+  return { hex: "#" + h.slice(0, 6).toLowerCase(), alpha: h.length === 8 ? parseInt(h.slice(6), 16) / 255 : 1 };
+}
+function joinColor(hex, alpha) {
+  const a = Math.round(alpha * 255);
+  return hex.toUpperCase() + (a >= 255 ? "" : a.toString(16).padStart(2, "0").toUpperCase());
+}
+function renderBorder() {
+  const p = $("#pane-border"); p.innerHTML = "";
+  const c = parseColor(cfg.border.color);
+  const colorInput = el("input", { type: "color", value: c.hex, "aria-label": "border colour" });
+  const alpha = el("input", { type: "range", min: 0, max: 100, value: Math.round(c.alpha * 100), "aria-label": "opacity" });
+  const alphaOut = el("output", {}, Math.round(c.alpha * 100) + "%");
+  const update = () => {
+    cfg.border.color = joinColor(colorInput.value, alpha.value / 100);
+    alphaOut.textContent = alpha.value + "%";
+    changed();
+  };
+  colorInput.addEventListener("input", update);
+  alpha.addEventListener("input", update);
+  const swatches = el("div", { class: "swatches" }, SWATCHES.map(([col, name]) => el("button", {
+    title: name, "aria-label": name, style: `background:${col.length > 7 ? "#" + col.slice(1, 7) : col}`,
+    onclick: () => { cfg.border.color = col; changed(); renderBorder(); },
+  })));
+  p.append(
+    el("div", { class: "preview", id: "border-preview" }),
+    el("h2", {}, "Border"),
+    card(
+      row("Show a border around the focused window", null, toggle("border.enabled")),
+      row("Colour", null, el("div", { class: "control" }, swatches, colorInput), { dep: "border.enabled" }),
+      row("Opacity", null, el("div", { class: "slider" }, alpha, alphaOut), { dep: "border.enabled" }),
+      row("Thickness", null, slider("border.width", { min: 0.5, max: 12, step: 0.5, fmt: (v) => v + " pt" }), { dep: "border.enabled" }),
+      row("Corner radius", "Match your windows: about 10 before macOS 26, 16 or more on macOS 26.", slider("border.radius", { min: 0, max: 30, step: 1, fmt: (v) => v + " pt" }), { dep: "border.enabled" }),
+      row("Distance from window", "Negative values draw on top of the window's edge.", slider("border.offset", { min: -10, max: 10, step: 0.5, fmt: (v) => v + " pt" }), { dep: "border.enabled" }),
+      row("Glow", "A soft halo around the line. 0 turns it off.", slider("border.glow", { min: 0, max: 20, step: 1, fmt: (v) => (v ? v + " pt" : "Off") }), { dep: "border.enabled" }),
+      row("Only highlight tiled windows", "Leave floating windows and dialogs without a border.", toggle("border.tiled_only"), { dep: "border.enabled" }),
+    ),
+  );
+  syncDeps();
+  drawBorderPreview();
+}
+function drawBorderPreview() {
+  const box = $("#border-preview"); if (!box) return;
+  box.innerHTML = "";
+  const b = cfg.border, c = parseColor(b.color);
+  const W = box.clientWidth || 600;
+  const win = { x: 40, y: 30, w: Math.min(330, W * 0.48), h: 130 };
+  const other = { x: win.x + win.w + 14, y: 30, w: Math.min(240, W - win.w - 100), h: 130 };
+  for (const [r, focused] of [[win, true], [other, false]]) {
+    const m = el("div", { class: "mock", style: `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;border-radius:${b.radius}px;opacity:${focused ? 1 : 0.85}` },
+      el("div", { class: "bar" }, el("i"), el("i"), el("i")),
+      el("div", { class: "lines" }, el("b", { style: "width:80%" }), el("b", { style: "width:60%" }), el("b", { style: "width:70%" })));
+    box.append(m);
+  }
+  if (!b.enabled) return;
+  const reach = b.offset + b.width;
+  const rgba = `rgba(${parseInt(c.hex.slice(1, 3), 16)},${parseInt(c.hex.slice(3, 5), 16)},${parseInt(c.hex.slice(5, 7), 16)},${c.alpha})`;
+  box.append(el("div", { class: "ring", style:
+    `left:${win.x - reach}px;top:${win.y - reach}px;width:${win.w + 2 * reach}px;height:${win.h + 2 * reach}px;` +
+    `border:${b.width}px solid ${rgba};border-radius:${Math.max(0, b.radius + reach)}px;` +
+    (b.glow > 0 ? `box-shadow:0 0 ${b.glow}px ${rgba}, inset 0 0 ${b.glow / 2}px ${rgba};` : "") }));
+}
+
+function renderInput() {
+  const p = $("#pane-input"); p.innerHTML = "";
+  p.append(
+    el("h2", {}, "Trackpad"),
+    card(
+      row("Swipe to scroll the strip", "In the scrolling layout, a horizontal swipe moves the strip with your fingers.", toggle("gestures.enabled")),
+      row("Fingers", null, seg("gestures.fingers", [[3, "Three"], [4, "Four"]]), { dep: "gestures.enabled" }),
+      row("Sensitivity", null, slider("gestures.sensitivity", { min: 0.3, max: 3, step: 0.1, fmt: (v) => v.toFixed(1) + "×" }), { dep: "gestures.enabled" }),
+      row("Natural direction", "The strip follows your fingers, like natural scrolling.", toggle("gestures.natural"), { dep: "gestures.enabled" }),
+    ),
+    el("p", { class: "note" }, "macOS also uses a three-finger swipe to switch Spaces, and three-finger drag swallows three-finger swipes. If swiping does nothing, use four fingers here or change System Settings › Trackpad › More Gestures. Advanced › Run checks tells you which applies."),
+    el("h2", {}, "Mouse"),
+    card(
+      row("Focus follows mouse", "Hovering over a tiled window focuses it, without scrolling.", toggle("focus.follows_mouse")),
+      row("Mouse follows focus", "Moving focus with the keyboard moves the pointer into the window.", toggle("focus.mouse_follows_focus")),
+    ),
+  );
+  syncDeps();
+}
+
+// ---------- shortcuts ----------
+let filter = "";
+function renderShortcuts() {
+  const p = $("#pane-shortcuts");
+  const scroll = $("#content").scrollTop;
+  p.innerHTML = "";
+  const search = el("input", { type: "search", placeholder: "Search actions or keys", value: filter, "aria-label": "search shortcuts" });
+  search.addEventListener("input", () => { filter = search.value; renderShortcuts(); $("#pane-shortcuts input[type=search]").focus(); });
+  p.append(el("div", { class: "toolbar" }, search,
+    el("button", { class: "btn", onclick: () => { if (confirm("Restore every shortcut to its default?")) { binds = clone(S.default_bindings); cfg.replace_default_bindings = false; changed(); renderShortcuts(); } } }, "Restore Defaults")));
+  const byAction = new Map();
+  for (const [c, a] of binds) { if (!byAction.has(a)) byAction.set(a, []); byAction.get(a).push(c); }
+  const groups = new Map();
+  const known = new Set();
+  for (const e of S.catalog) {
+    known.add(e.action);
+    if (!groups.has(e.group)) groups.set(e.group, []);
+    groups.get(e.group).push(e);
+  }
+  for (const a of byAction.keys()) if (!known.has(a)) {
+    if (!groups.has("Other")) groups.set("Other", []);
+    groups.get("Other").push({ group: "Other", action: a, label: a, layout: "any" });
+  }
+  const q = filter.trim().toLowerCase();
+  let shown = 0;
+  for (const [group, entries] of groups) {
+    const rows = [];
+    for (const e of entries) {
+      const combos = byAction.get(e.action) || [];
+      const hay = (e.label + " " + e.action + " " + combos.map(prettyCombo).join(" ") + " " + combos.join(" ")).toLowerCase();
+      if (q && !hay.includes(q)) continue;
+      const chips = el("div", { class: "chips" });
+      for (const c of combos) {
+        const w = comboWarning(c);
+        chips.append(el("span", { class: "chip" + (w ? " warn" : ""), title: w || c },
+          w ? el("span", { class: "w" }, "⚠") : null,
+          el("kbd", {}, prettyCombo(c)),
+          el("button", { title: "Remove", "aria-label": "remove " + c, onclick: () => { binds = binds.filter(([x]) => x !== c); changed(); renderShortcuts(); } }, svg(ICON_X, 10))));
+      }
+      chips.append(el("button", { class: "add-key", onclick: () => record(e) }, combos.length ? "+" : "+ Add"));
+      const tag = e.layout === "any" ? null : el("span", { class: "tag" }, e.layout + " only");
+      rows.push(row(el("span", {}, e.label, tag), null, chips));
+    }
+    if (!rows.length) continue;
+    shown += rows.length;
+    p.append(el("h2", {}, group), card(...rows));
+  }
+  if (!shown) p.append(el("div", { class: "card" }, el("div", { class: "empty" }, "No actions match “" + filter + "”.")));
+  p.append(el("h2", {}, "Advanced"),
+    card(row("Ignore the built-in shortcuts", "Only the shortcuts listed above are kept, and future versions won't add new defaults.", toggle("replace_default_bindings"))));
+  $("#content").scrollTop = scroll;
+}
+
+// recorder
+let rec = null;
+function record(entry) {
+  rec = { entry, combo: null };
+  $("#rec-title").textContent = "New shortcut";
+  $("#rec-sub").textContent = entry.label;
+  $("#rec-keys").textContent = "Press keys…";
+  setRecMsg("Hold modifier keys (⌃ ⌥ ⇧ ⌘) and press a key. Esc cancels.");
+  $("#rec-actions").innerHTML = "";
+  $("#rec-actions").append(el("button", { class: "btn", onclick: stopRecording }, "Cancel"));
+  $("#recorder").classList.add("open");
+  api("POST", "/api/recording", { on: true }).catch(() => {});
+}
+function setRecMsg(text, warn) { const m = $("#rec-msg"); m.textContent = text; m.className = "msg" + (warn ? " warn" : ""); }
+function stopRecording() {
+  $("#recorder").classList.remove("open");
+  rec = null;
+  api("POST", "/api/recording", { on: false }).catch(() => {});
+}
+function modsOf(e) {
+  return MOD_ORDER.filter((m) => ({ ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, cmd: e.metaKey })[m]);
+}
+function commit(combo, replace) {
+  if (replace) binds = binds.filter(([c]) => c !== combo);
+  binds.push([combo, rec.entry.action]);
+  stopRecording(); changed(); renderShortcuts();
+}
+document.addEventListener("keydown", (e) => {
+  if (!rec) return;
+  e.preventDefault(); e.stopPropagation();
+  if (rec.combo) return; // waiting for a decision about a conflict
+  const mods = modsOf(e);
+  if (["Meta", "Control", "Alt", "Shift", "CapsLock", "Fn"].includes(e.key) || /^(Meta|Control|Alt|Shift)(Left|Right)$/.test(e.code)) {
+    $("#rec-keys").textContent = mods.map((m) => MOD_SYM[m]).join("") || "Press keys…";
+    return;
+  }
+  if (e.code === "Escape" && !mods.length) { stopRecording(); return; }
+  const name = keyName(e.code);
+  if (!name) { setRecMsg("That key can't be used for a shortcut.", true); return; }
+  const isF = /^f\d+$/.test(name);
+  if (!mods.length && !isF) { setRecMsg("Add at least one of ⌃ ⌥ ⌘ so the key still types normally in apps.", true); return; }
+  const combo = [...mods, name].join("+");
+  $("#rec-keys").textContent = prettyCombo(combo);
+  const existing = binds.find(([c]) => c === combo);
+  if (existing && existing[1] === rec.entry.action) { setRecMsg("Already set for this action.", false); setTimeout(stopRecording, 700); return; }
+  if (existing) {
+    rec.combo = combo;
+    const other = (S.catalog.find((x) => x.action === existing[1]) || { label: existing[1] }).label;
+    setRecMsg(prettyCombo(combo) + " is used by “" + other + "”. Use it here instead?", true);
+    $("#rec-actions").innerHTML = "";
+    $("#rec-actions").append(
+      el("button", { class: "btn", onclick: stopRecording }, "Cancel"),
+      el("button", { class: "btn primary", onclick: () => commit(combo, true) }, "Replace"));
+    return;
+  }
+  const w = comboWarning(combo);
+  if (w) {
+    rec.combo = combo;
+    setRecMsg(w + ". Use it anyway?", true);
+    $("#rec-actions").innerHTML = "";
+    $("#rec-actions").append(
+      el("button", { class: "btn", onclick: stopRecording }, "Cancel"),
+      el("button", { class: "btn primary", onclick: () => commit(combo, false) }, "Use It"));
+    return;
+  }
+  commit(combo, false);
+}, true);
+
+// ---------- rules ----------
+function renderRules() {
+  const p = $("#pane-rules"); p.innerHTML = "";
+  const apps = Array.isArray(S.apps) ? S.apps : [];
+  p.append(el("datalist", { id: "apps" }, apps.flatMap((a) => [el("option", { value: a.bundle }, a.name), el("option", { value: a.name })])));
+  p.append(el("p", { class: "note", style: "margin-top:0" },
+    "Rules decide what happens to new windows. A rule matches when the app (bundle ID or name) and the title pattern both match. Later rules win."));
+  const list = el("div", { class: "card" });
+  if (!cfg.rules.length) list.append(el("div", { class: "empty" }, "No rules yet. Dialogs and fixed-size windows already float on their own."));
+  cfg.rules.forEach((r, i) => {
+    const appInput = el("input", { type: "text", value: r.app || "", list: "apps", placeholder: "com.apple.calculator or Calculator", "aria-label": "rule app" });
+    appInput.addEventListener("input", () => { r.app = appInput.value || null; changed(); });
+    const titleInput = el("input", { type: "text", value: r.title || "", placeholder: "Any title (regular expression)", "aria-label": "rule title" });
+    titleInput.addEventListener("input", () => {
+      let ok = true;
+      try { if (titleInput.value) new RegExp(titleInput.value); } catch { ok = false; }
+      titleInput.classList.toggle("invalid", !ok);
+      r.title = titleInput.value || null; changed();
+    });
+    const floatSeg = el("div", { class: "seg" });
+    const drawFloat = () => {
+      floatSeg.innerHTML = "";
+      for (const [v, label] of [[null, "Automatic"], [true, "Float"], [false, "Tile"]]) {
+        floatSeg.append(el("button", { class: r.float === v ? "on" : "", onclick: () => { r.float = v; changed(); drawFloat(); } }, label));
+      }
+    };
+    drawFloat();
+    const hasWidth = el("input", { type: "checkbox", checked: r.width != null, "aria-label": "set width" });
+    const widthRange = el("input", { type: "range", min: 0.1, max: 1, step: 0.01, value: r.width ?? 0.5, disabled: r.width == null, "aria-label": "rule width" });
+    const widthOut = el("output", {}, r.width != null ? pct(r.width) : "Default");
+    hasWidth.addEventListener("change", () => { r.width = hasWidth.checked ? parseFloat(widthRange.value) : null; widthRange.disabled = !hasWidth.checked; widthOut.textContent = r.width != null ? pct(r.width) : "Default"; changed(); });
+    widthRange.addEventListener("input", () => { r.width = parseFloat(widthRange.value); widthOut.textContent = pct(r.width); changed(); });
+    const openSel = el("select", { "aria-label": "open at" },
+      [["", "Default"], ["next", "Next to focused"], ["start", "At the start"], ["end", "At the end"]].map(([v, l]) => el("option", { value: v, selected: (r.open_at || "") === v }, l)));
+    openSel.addEventListener("change", () => { r.open_at = openSel.value || null; changed(); });
+    const move = (d) => { const j = i + d; [cfg.rules[i], cfg.rules[j]] = [cfg.rules[j], cfg.rules[i]]; changed(); renderRules(); };
+    list.append(el("div", { class: "rule" },
+      el("div", { class: "rule-head" },
+        el("span", { class: "n" }, i + 1),
+        el("strong", { style: "flex:1" }, r.app || r.title || "New rule"),
+        el("button", { class: "icon", title: "Move up", disabled: i === 0, onclick: () => move(-1) }, svg(ICON_UP)),
+        el("button", { class: "icon", title: "Move down", disabled: i === cfg.rules.length - 1, onclick: () => move(1) }, svg(ICON_DOWN)),
+        el("button", { class: "icon", title: "Delete rule", onclick: () => { cfg.rules.splice(i, 1); changed(); renderRules(); } }, svg(ICON_TRASH))),
+      el("div", { class: "rule-grid" },
+        el("label", {}, "App"), appInput,
+        el("label", {}, "Title matches"), titleInput,
+        el("label", {}, "Window"), el("div", {}, floatSeg),
+        el("label", {}, "Width"), el("div", { class: "slider" }, el("label", { class: "switch" }, hasWidth, el("span")), widthRange, widthOut),
+        el("label", {}, "Opens"), el("div", {}, openSel))));
+  });
+  p.append(list, el("div", { class: "toolbar", style: "margin-top:10px" },
+    el("button", { class: "btn", onclick: () => { cfg.rules.push({ app: null, title: null, float: null, width: null, open_at: null }); renderRules(); } }, "Add Rule")));
+  if (!apps.length) p.append(el("p", { class: "note" }, S.running ? "" : "Start Stripline to get suggestions from your running apps."));
+}
+
+// ---------- displays ----------
+function isManaged(d) {
+  return !cfg.displays.disabled.some((x) => x.toLowerCase() === d.name.toLowerCase() || x.toLowerCase() === d.uuid.toLowerCase());
+}
+function renderDisplays() {
+  const p = $("#pane-displays"); p.innerHTML = "";
+  const displays = Array.isArray(S.displays) ? S.displays : [];
+  p.append(el("h2", {}, "Connected displays"));
+  if (!displays.length) {
+    p.append(card(el("div", { class: "empty" }, S.running ? "No displays reported." : "Start Stripline to see your displays here.")));
+  } else {
+    p.append(card(...displays.map((d, i) => {
+      const input = el("input", { type: "checkbox", checked: isManaged(d), "aria-label": "manage " + d.name });
+      input.addEventListener("change", () => {
+        const dupName = displays.filter((x) => x.name === d.name).length > 1;
+        cfg.displays.disabled = cfg.displays.disabled.filter((x) => x.toLowerCase() !== d.name.toLowerCase() && x.toLowerCase() !== d.uuid.toLowerCase());
+        if (!input.checked) cfg.displays.disabled.push(dupName ? d.uuid : d.name);
+        changed(); renderDisplays();
+      });
+      const size = d.frame ? Math.round(d.frame[2]) + " × " + Math.round(d.frame[3]) : "";
+      return row(d.name + (i === 0 ? "  (main)" : ""), size + (isManaged(d) ? " · tiled by Stripline" : " · left alone"),
+        el("label", { class: "switch" }, input, el("span")));
+    })));
+  }
+  const stale = cfg.displays.disabled.filter((x) => !displays.some((d) => d.name.toLowerCase() === x.toLowerCase() || d.uuid.toLowerCase() === x.toLowerCase()));
+  if (stale.length) {
+    p.append(el("h2", {}, "Left alone, not connected"), card(...stale.map((x) => row(x, null,
+      el("button", { class: "btn", onclick: () => { cfg.displays.disabled = cfg.displays.disabled.filter((y) => y !== x); changed(); renderDisplays(); } }, "Remove")))));
+  }
+  p.append(el("p", { class: "note" }, "Windows on a display that is left alone stay exactly where you put them. Useful for a presentation screen or a portrait monitor."));
+}
+
+// ---------- advanced ----------
+function renderAdvanced() {
+  const p = $("#pane-advanced"); p.innerHTML = "";
+  const report = el("pre", { class: "report" }, "Checks permissions, other window managers, Stage Manager, Spaces settings and trackpad gesture clashes.");
+  p.append(
+    el("h2", {}, "Checks"),
+    el("div", { class: "card" }, report),
+    el("div", { class: "toolbar", style: "margin-top:8px" }, el("button", { class: "btn", onclick: async () => {
+      report.textContent = "Running…";
+      try { report.textContent = (await api("GET", "/api/doctor")).report; } catch (e) { report.textContent = e.message; }
+    } }, "Run Checks")),
+    el("h2", {}, "Config file"),
+    card(
+      row("Location", S.path, el("button", { class: "btn", onclick: openConfig }, "Open in Editor")),
+      row("Undo my changes", "Go back to the settings as they were when this window opened.", el("button", { class: "btn", onclick: revert }, "Revert")),
+      row("Reset everything", "All settings, shortcuts and rules back to their defaults.", el("button", { class: "btn danger", onclick: resetAll }, "Reset…")),
+    ),
+    el("h2", {}, "About"),
+    card(row("Stripline " + S.version, "Open source, MIT licensed. Running on " + S.platform + ".", el("span"))),
+  );
+}
+function revert() {
+  cfg = clone(initial.cfg); binds = clone(initial.binds); changed(); renderAll();
+}
+function resetAll() {
+  if (!confirm("Reset all settings, shortcuts and rules to their defaults?")) return;
+  cfg = clone(S.defaults); binds = clone(S.default_bindings); changed(); renderAll();
+}
+
+// ---------- shell ----------
+const RENDER = { general: renderGeneral, layout: renderLayout, border: renderBorder, input: renderInput, shortcuts: renderShortcuts, rules: renderRules, displays: renderDisplays, advanced: renderAdvanced };
+function refreshLive() {
+  if (current === "border") drawBorderPreview();
+  if (current === "layout") drawGapPreview();
+}
+function show(id) {
+  current = id;
+  try { localStorage.setItem("stripline.pane", id); } catch {}
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.id === id));
+  document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("active", p.id === "pane-" + id));
+  $("#title").textContent = PANES.find((p) => p.id === id).label;
+  RENDER[id]();
+  $("#content").scrollTop = 0;
+}
+function renderAll() { RENDER[current](); }
+function renderNav() {
+  const nav = $("#nav");
+  for (const p of PANES) {
+    nav.append(el("button", { "data-id": p.id, onclick: () => show(p.id), title: p.label },
+      el("span", { class: "ico", style: "background:" + p.color, html: `<svg viewBox="0 0 16 16" fill="currentColor">${p.icon}</svg>` }),
+      el("span", { class: "txt" }, p.label)));
+  }
+}
+function banners() {
+  const b = $("#banners"); b.innerHTML = "";
+  if (S.file_error) b.append(el("div", { class: "banner" }, el("strong", {}, "Your config file has an error. "),
+    "Stripline is using the defaults. Changing anything here replaces the file with a working one (the old file is kept next to it as ", el("code", {}, "config.toml.bak"), ").",
+    el("div", { style: "margin-top:6px" }, el("code", {}, S.file_error))));
+  if (!S.running) b.append(el("div", { class: "banner info" }, "Stripline isn't running. Settings are still saved and take effect when it starts."));
+}
+async function boot() {
+  renderNav();
+  try {
+    S = await api("GET", "/api/state");
+  } catch (e) {
+    document.body.innerHTML = "";
+    document.body.append(el("div", { class: "empty", style: "margin:auto" }, "Could not load settings: " + e.message));
+    return;
+  }
+  cfg = clone(S.config);
+  binds = clone(S.bindings);
+  initial = { cfg: clone(cfg), binds: clone(binds) };
+  $("#version").textContent = "Version " + S.version;
+  $("#foot").innerHTML = "";
+  $("#foot").append(el("i", { class: "dot", style: `background:${S.running ? "var(--ok)" : "var(--muted)"}` }), S.running ? "Running" : "Not running");
+  banners();
+  setStatus("saved", "All changes are saved automatically");
+  let start = "general";
+  try { start = localStorage.getItem("stripline.pane") || "general"; } catch {}
+  show(RENDER[start] ? start : "general");
+  window.addEventListener("resize", refreshLive);
+}
+boot();
+</script>
+</body>
+</html>

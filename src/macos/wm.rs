@@ -2039,6 +2039,14 @@ impl Wm {
             "pause" => Ok(self.set_enabled(false)),
             "resume" => Ok(self.set_enabled(true)),
             "reload" => self.reload_config(),
+            "apps" => Ok(self.apps_json()),
+            "keylayout" => Ok(keylayout_json()),
+            "doctor" => Ok(super::doctor::report(false)),
+            "settings" => super::settings_window::open(self.mtm),
+            "recording on" | "recording off" => {
+                eventtap::set_recording(line.trim().ends_with("on"));
+                Ok("ok".into())
+            }
             "quit" => {
                 // Reply first; the process exits on the next turn of the run loop.
                 dispatch::Queue::main().exec_async(|| run_action(Action::Quit));
@@ -2047,6 +2055,21 @@ impl Wm {
             other => other.parse::<Action>().and_then(|a| self.action(a)),
         };
         reply.unwrap_or_else(|e| format!("error: {e}"))
+    }
+
+    /// Running apps, for the settings window's rule editor.
+    fn apps_json(&self) -> String {
+        let mut apps: Vec<(String, String)> = NSWorkspace::sharedWorkspace()
+            .runningApplications()
+            .iter()
+            .filter(|a| a.activationPolicy() == NSApplicationActivationPolicy::Regular)
+            .filter_map(|a| Some((a.localizedName()?.to_string(), a.bundleIdentifier()?.to_string())))
+            .filter(|(_, b)| !b.is_empty())
+            .collect();
+        apps.sort_by_key(|(n, _)| n.to_lowercase());
+        apps.dedup_by(|a, b| a.1 == b.1);
+        let v: Vec<_> = apps.into_iter().map(|(name, bundle)| json!({ "name": name, "bundle": bundle })).collect();
+        serde_json::to_string(&v).unwrap_or_default()
     }
 
     fn displays_json(&self) -> String {
@@ -2120,6 +2143,18 @@ impl Wm {
 }
 
 // ---- helpers ----------------------------------------------------------------
+
+/// Virtual key code -> the character it types on the active keyboard layout.
+fn keylayout_json() -> String {
+    let mut by_code: std::collections::BTreeMap<String, String> = Default::default();
+    for (c, code) in keymap::current_layout() {
+        let e = by_code.entry(code.to_string()).or_default();
+        if e.is_empty() {
+            *e = c.to_string();
+        }
+    }
+    serde_json::to_string(&by_code).unwrap_or_default()
+}
 
 fn zoom_disabled(el: &AxEl) -> bool {
     el.element(attr::ZOOM_BUTTON).and_then(|z| z.boolean(attr::ENABLED)) == Some(false)

@@ -75,6 +75,7 @@ mod tests {
 
     #[test]
     fn round_trip_over_socket() {
+        let _env = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("stripline-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("STRIPLINE_SOCKET", dir.join("s.sock"));

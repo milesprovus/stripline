@@ -32,7 +32,9 @@ fn line(ok: bool, text: &str) -> String {
     format!("{} {text}", if ok { "[ok]  " } else { "[warn]" })
 }
 
-pub fn report() -> String {
+/// `check_running` is false when the running instance itself asks (it would
+/// otherwise wait on its own control socket).
+pub fn report(check_running: bool) -> String {
     let mut out = Vec::new();
 
     out.push(line(
@@ -40,11 +42,10 @@ pub fn report() -> String {
         "Accessibility permission for this process (when run from a terminal, this is the terminal's permission)",
     ));
 
-    match ipc::send("ping") {
-        Ok(_) => out.push(line(true, "stripline is running")),
-        Err(_) => {
-            out.push(line(false, "stripline is not running (start it with `stripline` or `stripline service install`)"))
-        }
+    if !check_running || ipc::send("ping").is_ok() {
+        out.push(line(true, "stripline is running"));
+    } else {
+        out.push(line(false, "stripline is not running (start it with `stripline` or `stripline service install`)"));
     }
 
     let cfg = match Config::load(&config::config_path()) {
