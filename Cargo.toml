@@ -1,0 +1,34 @@
+[package]
+name = "stripline"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "A scrolling tiling window manager for macOS: windows live as columns on an endless horizontal strip"
+license = "MIT"
+readme = "README.md"
+keywords = ["macos", "window-manager", "tiling", "paperwm", "niri"]
+categories = ["command-line-utilities", "gui"]
+
+[dependencies]
+env_logger = "0.11.11"
+log = "0.4.34"
+regex = "1.13.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+signal-hook = "0.4.5"
+toml = "1.1.8"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+core-foundation = "0.10.1"
+core-foundation-sys = "0.8.7"
+dispatch = "0.2.0"
+objc2 = "0.6.5"
+objc2-app-kit = "0.3.2"
+objc2-core-graphics = "0.3.2"
+objc2-foundation = "0.3.2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

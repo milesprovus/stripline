@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  engine:
+    name: Engine tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --check
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
+
+  macos:
+    name: Build and test (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: ./scripts/bundle.sh
+      - name: Smoke test the CLI
+        run: |
+          dist/Stripline.app/Contents/MacOS/stripline --version
+          dist/Stripline.app/Contents/MacOS/stripline actions
+          dist/Stripline.app/Contents/MacOS/stripline bindings
+          dist/Stripline.app/Contents/MacOS/stripline doctor || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Stripline.app
+          path: dist/Stripline.app

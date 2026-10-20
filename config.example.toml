@@ -1,0 +1,62 @@
+# Stripline configuration
+#
+# Location: ~/.config/stripline/config.toml
+# Changes are picked up automatically within a couple of seconds.
+# Every setting is optional; the values shown are the defaults.
+
+# Set to true to start from no key bindings at all and define every one below.
+replace_default_bindings = false
+
+[layout]
+gap = 8                 # points between columns and between stacked windows
+outer_gap = 8           # or { top = 8, right = 8, bottom = 8, left = 8 }
+default_width = 0.5     # width of new columns, as a fraction of the screen
+width_presets = [0.333, 0.5, 0.667, 0.75]   # visited by cycle-width
+width_step = 0.1        # wider / narrower
+height_step = 0.1       # taller / shorter
+center = "never"        # "never" | "on-overflow" | "always"
+open_at = "next"        # "next" (right of focus) | "start" | "end"
+
+[animation]
+enabled = true
+speed = 22              # spring speed; higher is snappier
+
+[gestures]
+enabled = true
+fingers = 3             # 3 or 4. Make sure macOS is not using the same swipe
+                        # for switching Spaces (run `stripline doctor`).
+sensitivity = 1.0
+natural = true          # the strip follows your fingers
+
+[focus]
+follows_mouse = false
+mouse_follows_focus = false
+
+[displays]
+# Displays to leave alone, by name or UUID (`stripline msg displays` lists them).
+disabled = []
+
+# Window rules. Later rules override earlier ones. `app` is a bundle
+# identifier or app name; `title` is a regular expression.
+#
+# [[rules]]
+# app = "com.apple.calculator"
+# float = true
+#
+# [[rules]]
+# app = "com.apple.Terminal"
+# width = 0.333
+#
+# [[rules]]
+# app = "Slack"
+# open_at = "end"
+
+# Key bindings: "modifiers+key" = "action". Modifiers: ctrl, alt (option),
+# shift, cmd, plus "meh" (ctrl+alt+shift) and "hyper" (all four). Keys are
+# letters, digits, punctuation, or names such as left, right, up, down,
+# return, space, tab, escape, home, end, pageup, pagedown, f1-f20, minus,
+# equal, leftbracket, rightbracket. Map a combination to "none" to unbind it.
+# Run `stripline actions` for the list of actions.
+[bindings]
+# "hyper+h" = "focus-left"
+# "ctrl+alt+h" = "none"
