@@ -6,7 +6,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{define_class, msg_send, sel, MainThreadOnly};
 use objc2_app_kit::{NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength};
-use objc2_foundation::{ns_string, MainThreadMarker, NSString};
+use objc2_foundation::{ns_string, MainThreadMarker, NSDate, NSDateFormatter, NSDateFormatterStyle, NSString};
 
 use super::wm;
 use crate::action::Action;
@@ -23,6 +23,11 @@ define_class!(
         #[unsafe(method(toggleTiling:))]
         fn toggle_tiling(&self, _sender: Option<&AnyObject>) {
             wm::run_action(Action::ToggleTiling);
+        }
+
+        #[unsafe(method(reloadConfig:))]
+        fn reload_config(&self, _sender: Option<&AnyObject>) {
+            wm::run_action(Action::ReloadConfig);
         }
 
         #[unsafe(method(retile:))]
@@ -61,6 +66,8 @@ struct Menu {
     _item: Retained<NSStatusItem>,
     _target: Retained<MenuTarget>,
     toggle: Retained<NSMenuItem>,
+    /// Disabled line at the top showing the result of the last config load.
+    status: Retained<NSMenuItem>,
 }
 
 thread_local! {
@@ -102,19 +109,51 @@ pub fn install(mtm: MainThreadMarker) {
     }
     let target = MenuTarget::new(mtm);
     let menu = NSMenu::new(mtm);
+    // No action, so AppKit shows it greyed out: a status line, not a button.
+    let status = NSMenuItem::new(mtm);
+    status.setTitle(ns_string!("Config not loaded yet"));
+    menu.addItem(&status);
+    menu.addItem(&NSMenuItem::separatorItem(mtm));
     let toggle = add(&menu, &target, "Pause Tiling", sel!(toggleTiling:), mtm);
+    add(&menu, &target, "Reload Config", sel!(reloadConfig:), mtm);
     add(&menu, &target, "Re-tile All Windows", sel!(retile:), mtm);
     add(&menu, &target, "Open Config…", sel!(openConfig:), mtm);
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     add(&menu, &target, "Quit Stripline", sel!(quit:), mtm);
     item.setMenu(Some(&menu));
-    MENU.with(|m| *m.borrow_mut() = Some(Menu { _item: item, _target: target, toggle }));
+    MENU.with(|m| *m.borrow_mut() = Some(Menu { _item: item, _target: target, toggle, status }));
 }
 
 pub fn set_paused(paused: bool) {
     MENU.with(|m| {
         if let Some(m) = m.borrow().as_ref() {
             m.toggle.setTitle(&NSString::from_str(if paused { "Resume Tiling" } else { "Pause Tiling" }));
+        }
+    });
+}
+
+/// Show the outcome of the last config (re)load: `Ok(skipped bindings)` or
+/// the error. The full error is in the item's tooltip and the log.
+pub fn set_config_status(result: Result<usize, &str>) {
+    let time = NSDateFormatter::localizedStringFromDate_dateStyle_timeStyle(
+        &NSDate::now(),
+        NSDateFormatterStyle::NoStyle,
+        NSDateFormatterStyle::MediumStyle,
+    );
+    let (title, tip) = match result {
+        Ok(0) => (format!("Config loaded at {time}"), None),
+        Ok(n) => (format!("Config loaded at {time}, {n} bindings skipped"), None),
+        Err(e) => {
+            let first = e.lines().next().unwrap_or(e);
+            let short: String = first.chars().take(60).collect();
+            let ellipsis = if short.len() < first.len() { "…" } else { "" };
+            (format!("⚠ Config error at {time}: {short}{ellipsis}"), Some(e.to_string()))
+        }
+    };
+    MENU.with(|m| {
+        if let Some(m) = m.borrow().as_ref() {
+            m.status.setTitle(&NSString::from_str(&title));
+            m.status.setToolTip(tip.as_deref().map(NSString::from_str).as_deref());
         }
     });
 }

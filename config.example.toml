@@ -32,6 +32,16 @@ natural = true          # the strip follows your fingers
 follows_mouse = false
 mouse_follows_focus = false
 
+[border]
+# A coloured line around the focused window.
+enabled = true
+color = "#3D8BFF"       # "#RRGGBB" or "#RRGGBBAA" (with transparency)
+width = 3               # thickness in points
+radius = 12             # corner radius of your windows (about 10 before macOS 26)
+offset = 0              # gap between window and line; negative draws inside
+glow = 0                # soft glow radius around the line, 0 = off
+tiled_only = false      # true: don't highlight floating windows
+
 [displays]
 # Displays to leave alone, by name or UUID (`stripline msg displays` lists them).
 disabled = []

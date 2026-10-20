@@ -8,7 +8,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::action::Action;
-use crate::engine::{CenterMode, OpenAt};
+use crate::engine::{CenterMode, OpenAt, Rect};
 use crate::keys::KeyCombo;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -21,6 +21,7 @@ pub struct Config {
     pub gestures: GestureConfig,
     pub focus: FocusConfig,
     pub displays: DisplayConfig,
+    pub border: BorderConfig,
     pub rules: Vec<Rule>,
     /// Key combination -> action. Map a combination to "none" to unbind it.
     pub bindings: BTreeMap<String, String>,
@@ -97,6 +98,68 @@ pub struct DisplayConfig {
     pub disabled: Vec<String>,
 }
 
+/// Highlight drawn around the focused window.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BorderConfig {
+    pub enabled: bool,
+    /// "#RGB", "#RRGGBB" or "#RRGGBBAA".
+    pub color: String,
+    /// Thickness of the line, in points.
+    pub width: f64,
+    /// Corner radius of your windows; the border's curve follows it.
+    pub radius: f64,
+    /// Space between the window edge and the border. Negative draws inside.
+    pub offset: f64,
+    /// Radius of a soft glow around the line; 0 turns it off.
+    pub glow: f64,
+    /// Only highlight tiled windows, not floating ones.
+    pub tiled_only: bool,
+}
+
+/// Where the border overlay goes for a window frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BorderLayout {
+    /// Frame of the overlay window (global, top-left origin).
+    pub outer: Rect,
+    /// The ring inside the overlay, relative to the overlay's origin.
+    pub ring: Rect,
+    /// Corner radius of the ring's outer edge.
+    pub corner_radius: f64,
+}
+
+impl BorderConfig {
+    pub fn rgba(&self) -> [f64; 4] {
+        parse_color(&self.color).unwrap_or([0.24, 0.55, 1.0, 1.0])
+    }
+
+    pub fn layout(&self, window: Rect) -> BorderLayout {
+        // Distance from the window edge to the outside of the line.
+        let reach = self.offset + self.width;
+        let pad = reach + self.glow;
+        let outer = window.inset(-pad, -pad, -pad, -pad);
+        let ring = Rect::new(self.glow, self.glow, outer.w - 2.0 * self.glow, outer.h - 2.0 * self.glow);
+        BorderLayout { outer, ring, corner_radius: (self.radius + reach).max(0.0) }
+    }
+}
+
+/// Parse "#RGB", "#RRGGBB" or "#RRGGBBAA" (the '#' is optional) into
+/// red, green, blue, alpha in 0..=1.
+pub fn parse_color(s: &str) -> Result<[f64; 4], String> {
+    let hex = s.trim().trim_start_matches('#');
+    let bad = || format!("'{s}' is not a colour; use #RRGGBB or #RRGGBBAA");
+    if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(bad());
+    }
+    let digits: Vec<u8> = match hex.len() {
+        3 => hex.chars().map(|c| c.to_digit(16).unwrap() as u8 * 17).collect(),
+        6 | 8 => (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect(),
+        _ => return Err(bad()),
+    };
+    let c = |i: usize| digits.get(i).map_or(1.0, |&v| v as f64 / 255.0);
+    Ok([c(0), c(1), c(2), c(3)])
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Rule {
@@ -133,6 +196,20 @@ impl Default for AnimationConfig {
 impl Default for GestureConfig {
     fn default() -> Self {
         GestureConfig { enabled: true, fingers: 3, sensitivity: 1.0, natural: true }
+    }
+}
+
+impl Default for BorderConfig {
+    fn default() -> Self {
+        BorderConfig {
+            enabled: true,
+            color: "#3D8BFF".into(),
+            width: 3.0,
+            radius: 12.0,
+            offset: 0.0,
+            glow: 0.0,
+            tiled_only: false,
+        }
     }
 }
 
@@ -257,6 +334,14 @@ impl Config {
         }
         if !(3..=4).contains(&self.gestures.fingers) {
             return Err("gestures.fingers must be 3 or 4".into());
+        }
+        let b = &self.border;
+        parse_color(&b.color).map_err(|e| format!("border.color: {e}"))?;
+        if !(b.width > 0.0 && b.width <= 20.0) {
+            return Err("border.width must be in (0, 20]".into());
+        }
+        if !(0.0..=60.0).contains(&b.radius) || !(-20.0..=20.0).contains(&b.offset) || !(0.0..=40.0).contains(&b.glow) {
+            return Err("border: radius must be 0-60, offset -20-20, glow 0-40".into());
         }
         if self.gestures.sensitivity <= 0.0 {
             return Err("gestures.sensitivity must be positive".into());
@@ -409,6 +494,32 @@ mod tests {
         assert!(Config::parse("[[rules]]\nfloat = true").is_err());
         assert!(Config::parse("[[rules]]\ntitle = \"(\"").is_err());
         assert!(Config::parse("[layout]\ngapp = 3").is_err(), "unknown keys are rejected");
+    }
+
+    #[test]
+    fn colours() {
+        assert_eq!(parse_color("#ff8000").unwrap(), [1.0, 128.0 / 255.0, 0.0, 1.0]);
+        assert_eq!(parse_color("F80").unwrap(), [1.0, 136.0 / 255.0, 0.0, 1.0]);
+        assert_eq!(parse_color("#00000080").unwrap()[3], 128.0 / 255.0);
+        for bad in ["", "#12", "#12345", "#gg0000", "blue", "#ff00ff0"] {
+            assert!(parse_color(bad).is_err(), "{bad}");
+        }
+        assert!(Config::parse("[border]\ncolor = \"red\"").is_err());
+        assert!(Config::parse("[border]\nwidth = 0").is_err());
+        assert!(Config::parse("[border]\ncolor = \"#ff0000\"\nwidth = 2\nglow = 6").is_ok());
+    }
+
+    #[test]
+    fn border_hugs_the_window() {
+        let b = BorderConfig { width: 3.0, offset: 1.0, glow: 5.0, radius: 10.0, ..BorderConfig::default() };
+        let l = b.layout(Rect::new(100.0, 50.0, 400.0, 300.0));
+        // 1 pt offset + 3 pt line + 5 pt glow on every side.
+        assert_eq!(l.outer, Rect::new(91.0, 41.0, 418.0, 318.0));
+        assert_eq!(l.ring, Rect::new(5.0, 5.0, 408.0, 308.0));
+        assert_eq!(l.corner_radius, 14.0);
+        // Drawn inside the window: never a negative radius.
+        let inside = BorderConfig { offset: -5.0, radius: 0.0, ..BorderConfig::default() };
+        assert_eq!(inside.layout(Rect::new(0.0, 0.0, 100.0, 100.0)).corner_radius, 0.0);
     }
 
     #[test]

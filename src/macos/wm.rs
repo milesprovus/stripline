@@ -20,6 +20,7 @@ use objc2_foundation::MainThreadMarker;
 use serde_json::json;
 
 use super::ax::{self, attr, notif, AxEl};
+use super::border::Border;
 use super::display::{self, Display, Spaces};
 use super::eventtap;
 use super::ffi::{AXObserverRef, AXUIElementRef, Pid, AX_ERR_CANNOT_COMPLETE, AX_ERR_INVALID_ELEMENT, AX_OK};
@@ -213,15 +214,25 @@ pub struct Wm {
     ffm_target: Option<WinId>,
     retry: Vec<(AxEl, Pid, u8)>,
     session_dirty: bool,
+    /// Why the config file could not be used at startup, if it couldn't.
+    cfg_error: Option<String>,
+    /// The focused window as last reported by macOS or set by Stripline.
+    focused: Option<WinId>,
+    /// Actual sizes read back after resizing (apps may round them).
+    sizes: HashMap<WinId, (f64, f64)>,
+    border: Option<Border>,
 }
 
 impl Wm {
     pub fn new(mtm: MainThreadMarker) -> Wm {
         let path = config::config_path();
-        let cfg = Config::load(&path).unwrap_or_else(|e| {
-            log::error!("{e}; using defaults");
-            Config::default()
-        });
+        let (cfg, cfg_error) = match Config::load(&path) {
+            Ok(c) => (c, None),
+            Err(e) => {
+                log::error!("{e}; using defaults");
+                (Config::default(), Some(e))
+            }
+        };
         Wm {
             mtm,
             rules: Rules::new(&cfg.rules),
@@ -246,6 +257,10 @@ impl Wm {
             ffm_target: None,
             retry: Vec::new(),
             session_dirty: false,
+            focused: None,
+            cfg_error,
+            sizes: HashMap::new(),
+            border: None,
         }
     }
 
@@ -255,7 +270,8 @@ impl Wm {
         }
         self.started = true;
         ax::AxEl::set_global_timeout(1.0);
-        self.apply_bindings();
+        let skipped = self.apply_bindings().len();
+        menu::set_config_status(self.cfg_error.as_deref().map_or(Ok(skipped), Err));
         if let Err(e) = eventtap::install() {
             log::error!("{e}");
         }
@@ -467,7 +483,11 @@ impl Wm {
         let key = self.untile(id);
         self.windows.remove(&id);
         self.min_widths.remove(&id);
+        self.sizes.remove(&id);
         self.drags.remove(&id);
+        if self.focused == Some(id) {
+            self.set_focused(None);
+        }
         if let (Some(key), true) = (key, was_focused) {
             later(Duration::from_millis(120), move |wm| wm.refocus(&key));
         }
@@ -711,6 +731,55 @@ impl Wm {
         if !self.anims.is_empty() {
             self.request_frame();
         }
+        self.update_border();
+    }
+
+    // ---- focus border ----------------------------------------------------
+
+    /// Window and frame the focus border should surround, if any.
+    fn border_target(&self) -> Option<(WinId, Rect)> {
+        let cfg = &self.cfg.border;
+        if !self.enabled || !self.started || !cfg.enabled {
+            return None;
+        }
+        let id = self.focused?;
+        if self.drags.contains_key(&id) {
+            return None;
+        }
+        let win = self.windows.get(&id)?;
+        match &win.state {
+            WinState::Tiled(key) if self.is_visible(key) && !self.parked.contains(&id) => {
+                let a = self.applied.get(&id)?;
+                let (w, h) = self.sizes.get(&id).copied().unwrap_or((a.w, a.h));
+                Some((id, Rect::new(a.x, a.y, w, h)))
+            }
+            WinState::Floating(Float::Auto | Float::Rule | Float::User) if !cfg.tiled_only => {
+                win.el.frame().map(|f| (id, f))
+            }
+            _ => None,
+        }
+    }
+
+    fn update_border(&mut self) {
+        match self.border_target() {
+            Some((id, frame)) => {
+                let primary_height = self.displays.first().map_or(0.0, |d| d.frame.h);
+                let border = self.border.get_or_insert_with(|| Border::new(self.mtm, &self.cfg.border));
+                border.show(id, frame, primary_height);
+            }
+            None => {
+                if let Some(b) = self.border.as_mut() {
+                    b.hide();
+                }
+            }
+        }
+    }
+
+    fn set_focused(&mut self, id: Option<WinId>) {
+        if self.focused != id {
+            self.focused = id;
+            self.request_frame();
+        }
     }
 
     /// Push the strip's computed frames to the windows.
@@ -768,13 +837,17 @@ impl Wm {
                 self.parked.insert(p.id);
             } else {
                 self.parked.remove(&p.id);
-                if resize && err == AX_OK {
+            }
+            if resize && err == AX_OK {
+                if let Some(actual) = win.el.size() {
+                    self.sizes.insert(p.id, (actual.width, actual.height));
                     // Some apps enforce a minimum width; lay out around it.
-                    if let Some(actual) = win.el.size() {
-                        if actual.width > t.w + 2.0 && self.min_widths.get(&p.id) != Some(&actual.width) {
-                            self.min_widths.insert(p.id, actual.width);
-                            remeasure = true;
-                        }
+                    if p.parked.is_none()
+                        && actual.width > t.w + 2.0
+                        && self.min_widths.get(&p.id) != Some(&actual.width)
+                    {
+                        self.min_widths.insert(p.id, actual.width);
+                        remeasure = true;
                     }
                 }
             }
@@ -832,7 +905,11 @@ impl Wm {
     }
 
     fn focus_os(&mut self, id: WinId) {
-        let Some(win) = self.windows.get(&id) else { return };
+        if !self.windows.contains_key(&id) {
+            return;
+        }
+        self.set_focused(Some(id));
+        let win = &self.windows[&id];
         win.el.set_bool(attr::MAIN, true);
         win.el.perform(ax::ACTION_RAISE);
         if let Some(app) = self.apps.get(&win.pid) {
@@ -863,8 +940,9 @@ impl Wm {
 
     /// Follow macOS focus (clicks, Cmd-Tab, apps raising windows).
     fn sync_focus(&mut self, scroll: bool) {
-        let Some((pid, el)) = self.os_focused() else { return };
-        let Some(id) = el.window_id() else { return };
+        let Some((pid, el)) = self.os_focused() else { return self.set_focused(None) };
+        let Some(id) = el.window_id() else { return self.set_focused(None) };
+        self.set_focused(Some(id));
         if !self.windows.contains_key(&id) {
             if let Track::Registered(id, Some((key, effect))) = self.track(el, pid, false) {
                 self.tile(id, key, effect, true);
@@ -1117,6 +1195,7 @@ impl Wm {
         } else {
             self.anims.clear();
             self.release_all();
+            self.update_border();
             "tiling is paused".into()
         }
     }
@@ -1161,10 +1240,18 @@ impl Wm {
     fn reload_config(&mut self) -> Result<String, String> {
         let path = config::config_path();
         self.cfg_stamp = modified(&path);
-        let cfg = Config::load(&path).inspect_err(|e| log::error!("config not reloaded: {e}"))?;
+        let cfg = Config::load(&path).inspect_err(|e| {
+            log::error!("config not reloaded: {e}");
+            menu::set_config_status(Err(e));
+        })?;
         self.cfg = cfg;
         self.rules = Rules::new(&self.cfg.rules);
         let warnings = self.apply_bindings();
+        menu::set_config_status(Ok(warnings.len()));
+        if let Some(b) = self.border.as_mut() {
+            b.set_style(&self.cfg.border);
+        }
+        self.update_border();
         if self.enabled {
             self.refresh_displays();
             self.applied.clear();
@@ -1285,6 +1372,10 @@ impl Wm {
     }
 
     fn on_moved(&mut self, id: WinId, resized: bool) {
+        if self.focused == Some(id) {
+            // Keep the border on a moving floating window, hide it during drags.
+            self.request_frame();
+        }
         let Some(win) = self.windows.get(&id) else { return };
         match win.state.clone() {
             WinState::Tiled(_) => {

@@ -2,6 +2,7 @@
 //! Accessibility-driven window manager.
 
 mod ax;
+mod border;
 mod display;
 pub mod doctor;
 mod eventtap;

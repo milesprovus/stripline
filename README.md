@@ -42,11 +42,12 @@ Accessibility API, so SIP can stay on.
 | Smart floating | Dialogs, panels and fixed-size windows float automatically. You can float or unfloat any window. |
 | Rules | Per app (bundle ID or name) and title regex: float, initial width, or where new windows open. |
 | No focus stealing | Windows that open in background apps are added to the strip without taking focus. |
+| Focus border | A coloured line around the focused window. Colour, thickness, corner radius, offset and an optional glow are configurable. |
 | Mouse | Drag a window onto another column to reorder or stack. Drag its edge to change the column width. Optional focus-follows-mouse and mouse-follows-focus. |
 | Session restore | Column order, widths, stacks and pins survive a restart. Windows are matched by ID, then by app and title. |
 | Live config | TOML file, reloaded automatically when you save it. Shortcuts follow your keyboard layout (QWERTZ, AZERTY, Dvorak, ...). |
 | Automation | `stripline msg <action>` over a Unix socket, plus a JSON `state` dump. |
-| Menu bar item | Pause or resume, re-tile, open config, quit. |
+| Menu bar item | Pause or resume, reload config, re-tile, open config, quit. The top line shows when the config was last loaded, or why it failed (hover for the full error). |
 | Launch at login | `stripline service install` sets up a LaunchAgent that also restarts Stripline if it crashes. |
 | `stripline doctor` | Checks permissions, conflicting apps, Stage Manager, Spaces settings and trackpad gesture clashes. |
 
@@ -124,6 +125,12 @@ center = "on-overflow"
 [gestures]
 fingers = 3
 
+[border]
+color = "#3D8BFF"            # or "#RRGGBBAA" for transparency
+width = 3
+radius = 12                  # match your windows' corner radius
+glow = 6                     # 0 = no glow
+
 [[rules]]
 app = "com.apple.calculator"
 float = true
@@ -162,6 +169,7 @@ Raycast, Alfred, skhd, BetterTouchTool or shell scripts.
    eventtap.rs    key bindings (active tap), mouse + trackpad touches (passive tap)
    display.rs     NSScreen geometry, Spaces, mouse
    keymap.rs      character -> key code for the active keyboard layout
+   border.rs      focus border overlay (one Core Animation layer)
    menu.rs        menu bar item
  src/config.rs, keys.rs, action.rs, ipc.rs, service.rs
 ```
@@ -188,8 +196,8 @@ Raycast, Alfred, skhd, BetterTouchTool or shell scripts.
 Compared with commercial scrolling window managers, these are missing:
 
 - a settings window (configuration is the TOML file)
-- on-screen overlays: strip indicator, focus border, dimming of inactive
-  windows, clickable tab bars
+- on-screen overlays other than the focus border: strip indicator, dimming
+  of inactive windows, clickable tab bars
 - treating a native macOS tab group as one column (each tab is managed as its
   own window)
 - a URL scheme and automatic updates
